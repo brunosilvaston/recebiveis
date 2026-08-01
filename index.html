@@ -52,6 +52,18 @@
   td{padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;vertical-align:middle}
   tbody tr:hover{background:#fbfcfe}
   .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr.lpago td{background:#f0fdf4}
+  tr.lpago:hover td{background:#dcfce7}
+  input.ed{padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;background:#fff;color:var(--ink);font-family:inherit}
+  input.ed:focus{outline:0;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.12)}
+  input.ed.num{text-align:right}
+  input:disabled{background:#f8fafc;color:var(--muted)}
+  .abas{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--line);background:#fbfcfe}
+  .abas a{padding:11px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .abas a:hover{color:var(--ink)}
+  .abas a.on{color:#2563eb;border-bottom-color:#2563eb}
+  .abas a b{background:#e0e7ff;color:#3730a3;border-radius:20px;padding:1px 7px;font-size:10.5px;margin-left:5px}
+  .r3{grid-template-columns:1fr 1fr 1fr}
   .tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
   .t-pago{background:var(--ok-soft);color:var(--ok)}
   .t-aberto{background:var(--brand-soft);color:var(--brand)}
@@ -118,6 +130,7 @@
 .lgbox .fld input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);box-sizing:border-box}
 .lgbox .fld input:focus{outline:0;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
 .lgbt{width:100%;justify-content:center;margin-top:20px;padding:12px;font-size:14px}
+.lgbt:disabled{opacity:.6;cursor:default}
 .lgpe{margin-top:18px;text-align:center;display:flex;flex-direction:column;gap:8px}
 .lgpe a{font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline}
 .lgpe a:hover{color:var(--ink)}
@@ -315,7 +328,7 @@
         <div id="tabParc"></div>
         <div class="mini" style="margin-top:8px">Dá para editar data e valor de cada parcela na mão — a soma é conferida abaixo.</div>
         <div id="somaBox" style="margin-top:12px"></div>
-        <div style="margin-top:14px;display:flex;gap:10px"><button class="btn okk" onclick="salvarPedido()">Salvar pedido e gerar parcelas</button><button class="btn ghost" onclick="limparNovo()">Limpar</button></div>
+        <div style="margin-top:14px;display:flex;gap:10px"><button class="btn okk" id="btSalvarPed" onclick="salvarPedido()">Salvar pedido e gerar parcelas</button><button class="btn ghost" onclick="limparNovo()">Limpar</button></div>
       </div>
     </div>
   </div>
@@ -404,9 +417,18 @@ function pintaNuvem(){
 }
 
 /* ---- autenticação ---- */
+async function buscar(url,op,seg){
+  const ac=new AbortController();
+  const t=setTimeout(()=>ac.abort(),(seg||20)*1000);
+  try{ return await fetch(url,Object.assign({signal:ac.signal},op)); }
+  catch(e){ throw new Error(e.name==='AbortError'
+    ? 'O banco demorou demais para responder. Confira sua internet e tente de novo.'
+    : 'Não consegui falar com o banco. Confira sua internet.'); }
+  finally{ clearTimeout(t); }
+}
 async function sbAuth(rota,corpo){
-  const r=await fetch(SB.url+'/auth/v1/'+rota,{method:'POST',
-    headers:{'Content-Type':'application/json','apikey':SB.key},body:JSON.stringify(corpo)});
+  const r=await buscar(SB.url+'/auth/v1/'+rota,{method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SB.key},body:JSON.stringify(corpo)},20);
   const j=await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(j.error_description||j.msg||j.message||('Erro '+r.status));
   return j;
@@ -433,9 +455,9 @@ async function rest(metodo,caminho,corpo,extra){
   if(SB.exp && Date.now()>SB.exp) await renovar();
   const h={'apikey':SB.key,'Authorization':'Bearer '+SB.tok,'Content-Type':'application/json'};
   if(extra) Object.assign(h,extra);
-  let r=await fetch(SB.url+'/rest/v1/'+caminho,{method:metodo,headers:h,body:corpo?JSON.stringify(corpo):undefined});
+  let r=await buscar(SB.url+'/rest/v1/'+caminho,{method:metodo,headers:h,body:corpo?JSON.stringify(corpo):undefined},30);
   if(r.status===401){ await renovar(); h['Authorization']='Bearer '+SB.tok;
-    r=await fetch(SB.url+'/rest/v1/'+caminho,{method:metodo,headers:h,body:corpo?JSON.stringify(corpo):undefined}); }
+    r=await buscar(SB.url+'/rest/v1/'+caminho,{method:metodo,headers:h,body:corpo?JSON.stringify(corpo):undefined},30); }
   if(!r.ok){ const t=await r.text(); throw new Error(traduzErro(t,r.status)); }
   const t=await r.text();
   return t?JSON.parse(t):null;
@@ -461,9 +483,12 @@ async function baixarTudo(){
   ]);
   const emp=(cf||[]).find(x=>x.chave==='empresa');
   const nb={cfg:{empresa:emp?emp.valor:(DB.cfg.empresa||'ABOU KHIR IMPORTAÇÕES')},clientes:[],pedidos:[]};
-  (cl||[]).forEach(c=>nb.clientes.push({id:c.id,nome:c.nome,fantasia:c.fantasia||'',doc:c.doc||'',cidade:c.cidade||'',fone:c.fone||'',limite:+c.limite||0,obs:c.obs||''}));
+  (cl||[]).forEach(c=>nb.clientes.push({id:c.id,nome:c.nome,fantasia:c.fantasia||'',doc:c.doc||'',cidade:c.cidade||'',
+    fone:c.fone||'',limite:+c.limite||0,obs:c.obs||'',email:c.email||'',ie:c.ie||'',contato:c.contato||'',
+    endereco:c.endereco||'',bairro:c.bairro||'',cep:c.cep||'',transp:c.transp||'',prazo:c.prazo||''}));
   const mp={};
-  (pe||[]).forEach(p=>{ const o={id:p.id,num:String(p.num),data:p.data||'',clienteId:p.cliente_id,total:+p.total||0,cond:p.cond||'',obs:p.obs||'',itens:[],parcelas:[]}; mp[p.id]=o; nb.pedidos.push(o); });
+  (pe||[]).forEach(p=>{ const o={id:p.id,num:String(p.num),data:p.data||'',clienteId:p.cliente_id,total:+p.total||0,
+    cond:p.cond||'',obs:p.obs||'',desc:+p.desconto||0,itens:[],parcelas:[]}; mp[p.id]=o; nb.pedidos.push(o); });
   (it||[]).forEach(i=>{ const o=mp[i.pedido_id]; if(o) o.itens.push({cod:i.cod||'',desc:i.descricao||'',un:i.un||'',qtd:+i.qtd||0,unit:+i.unit||0,total:+i.total||0}); });
   const mpar={};
   (pa||[]).forEach(x=>{ const o=mp[x.pedido_id]; if(!o) return; const q={venc:x.venc,valor:+x.valor||0,pagos:[]}; o.parcelas[x.n-1]=q; mpar[x.id]=q; });
@@ -476,7 +501,9 @@ async function baixarTudo(){
   DB.clientes.forEach(c=>ESPELHO.c[c.id]=JSON.stringify(c));
   DB.pedidos.forEach(p=>ESPELHO.p[p.id]=JSON.stringify(p));
   document.getElementById('logoNome').textContent=DB.cfg.empresa||'CONTROLE DE RECEBÍVEIS';
-  _save(); SB.pronto=true; SB.carregando=false; renderAll(); pintaNuvem();
+  _save(); SB.pronto=true; SB.carregando=false; PENDENTE=false; renderAll(); pintaNuvem();
+  const vs=(cf||[]).find(x=>x.chave==='versao'); VERSAO=vs?vs.valor:VERSAO;
+  ligarVigia();
 }
 
 /* ---- gravação incremental: manda só o que mudou ---- */
@@ -485,13 +512,15 @@ async function subirMudancas(){
   const el=document.getElementById('nuvemSt');
   const cli=[],ped=[],ite=[],par=[],rec=[],apagaP=[],apagaC=[];
   DB.clientes.forEach(c=>{ const j=JSON.stringify(c); if(ESPELHO.c[c.id]!==j)
-    cli.push({id:c.id,nome:c.nome,fantasia:c.fantasia||null,doc:c.doc||null,cidade:c.cidade||null,fone:c.fone||null,limite:c.limite||0,obs:c.obs||null}); });
+    cli.push({id:c.id,nome:c.nome,fantasia:c.fantasia||null,doc:c.doc||null,cidade:c.cidade||null,fone:c.fone||null,
+      limite:c.limite||0,obs:c.obs||null,email:c.email||null,ie:c.ie||null,contato:c.contato||null,
+      endereco:c.endereco||null,bairro:c.bairro||null,cep:c.cep||null,transp:c.transp||null,prazo:c.prazo||null}); });
   const vivosC={}; DB.clientes.forEach(c=>vivosC[c.id]=1);
   Object.keys(ESPELHO.c).forEach(id=>{ if(!vivosC[id]) apagaC.push(id); });
 
   const mudados=[];
   DB.pedidos.forEach(p=>{ const j=JSON.stringify(p); if(ESPELHO.p[p.id]===j) return; mudados.push(p);
-    ped.push({id:p.id,num:String(p.num),data:p.data||null,cliente_id:p.clienteId,total:p.total||0,cond:p.cond||null,obs:p.obs||null});
+    ped.push({id:p.id,num:String(p.num),data:p.data||null,cliente_id:p.clienteId,total:p.total||0,cond:p.cond||null,obs:p.obs||null,desconto:p.desc||0});
     (p.itens||[]).forEach((i,k)=>ite.push({id:p.id+'-'+k,pedido_id:p.id,seq:k,cod:i.cod||null,descricao:i.desc||null,un:i.un||null,qtd:i.qtd||0,unit:i.unit||0,total:i.total||0}));
     (p.parcelas||[]).forEach((x,k)=>{ const pid=p.id+'-'+(k+1);
       par.push({id:pid,pedido_id:p.id,n:k+1,venc:x.venc,valor:x.valor||0});
@@ -520,6 +549,8 @@ async function subirMudancas(){
     DB.clientes.forEach(c=>ESPELHO.c[c.id]=JSON.stringify(c));
     DB.pedidos.forEach(p=>ESPELHO.p[p.id]=JSON.stringify(p));
     apagaP.forEach(id=>delete ESPELHO.p[id]); apagaC.forEach(id=>delete ESPELHO.c[id]);
+    PENDENTE=false;
+    VERSAO=await lerVersao()||VERSAO;
     if(el){ el.innerHTML='☁ gravado '+new Date().toLocaleTimeString('pt-BR').slice(0,5)+'<br><span style="color:#334155">'+esc(SB.email)+'</span>'; }
   }catch(e){
     if(el){ el.innerHTML='☁ <span style="color:#f87171">falhou — tentando de novo</span>'; }
@@ -529,7 +560,32 @@ async function subirMudancas(){
 }
 function agendaSync(){
   if(!SB.pronto) return;
+  PENDENTE=true;
   clearTimeout(SYNC); SYNC=setTimeout(subirMudancas,1200);
+}
+
+/* ---- vigia: recarrega sozinho quando outra pessoa altera ---- */
+let VERSAO='', PENDENTE=false, VIGIA=null;
+async function lerVersao(){
+  try{ const r=await rest('GET','config?chave=eq.versao&select=valor');
+    return (r&&r[0]&&r[0].valor)||''; }catch(e){ return null; }
+}
+async function vigiar(){
+  if(!SB.pronto||SB.carregando||PENDENTE) return;
+  if(document.getElementById('mdl')) return;              // não interrompe quem está no meio de um cadastro
+  if(EDIT) return;                                        // nem quem está editando pedido
+  const v=await lerVersao();
+  if(v===null||v==='') return;
+  if(VERSAO && v!==VERSAO){
+    VERSAO=v;
+    await baixarTudo();
+    toast('Atualizado — alguém alterou os dados em outro computador');
+  } else if(!VERSAO) VERSAO=v;
+}
+function ligarVigia(){
+  clearInterval(VIGIA);
+  VIGIA=setInterval(vigiar,20000);
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) vigiar(); });
 }
 async function recarregarDoBanco(){
   if(!SB.tok) return alert('Entre no sistema primeiro.');
@@ -572,7 +628,8 @@ async function fazerLogin(){
   if(!u||!k){ m.innerHTML='<span style="color:#f87171">Faltou o endereço do banco ou a chave.</span>'; mostrarCfg(); return; }
   if(!e||!s){ m.innerHTML='<span style="color:#f87171">Preencha e-mail e senha.</span>'; return; }
   SB.url=u; SB.key=k; sbGravaCfg();
-  m.innerHTML='Entrando...';
+  const bt=document.querySelector('.lgbt'); if(bt){ bt.disabled=true; bt.textContent='Entrando...'; }
+  m.innerHTML='Verificando...';
   try{
     await entrar(e,s);
     m.innerHTML='Carregando os dados...';
@@ -583,10 +640,11 @@ async function fazerLogin(){
   }catch(x){
     let t=x.message||'';
     if(/Invalid login/i.test(t)) t='E-mail ou senha incorretos.';
-    if(/Failed to fetch/i.test(t)) t='Não consegui falar com o banco. Confira o endereço e sua internet.';
-    m.innerHTML='<span style="color:#f87171">'+esc(t)+'</span>';
+    if(/Failed to fetch/i.test(t)) t='Não consegui falar com o banco. Confira sua internet.';
+    if(/Signups not allowed|signup_disabled/i.test(t)) t='Cadastro fechado. Peça ao administrador para criar seu acesso.';
+    m.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>';
     SB.tok=null; sbGravaSessao();
-  }
+  }finally{ const b2=document.querySelector('.lgbt'); if(b2){ b2.disabled=false; b2.textContent='Entrar'; } }
 }
 function usarLocal(){
   document.getElementById('login').classList.add('hidden');
@@ -628,9 +686,14 @@ function statusDe(p){
   return pagoDe(p)>0 ? 'parcial' : 'aberto';
 }
 const LBL={pago:'Pago',vencido:'Vencido',hoje:'Vence hoje',parcial:'Parcial',aberto:'A vencer'};
+function ultimoPagamento(p){
+  const g=(p.pagos||[]).slice().sort((a,b)=>a.data<b.data?1:-1)[0];
+  return g?g.data:'';
+}
 function tagDe(p){
   const s=statusDe(p);
   let txt=LBL[s];
+  if(s==='pago'){ const d=ultimoPagamento(p); txt='✓ Pago'+(d?' em '+dbr(d):''); }
   if(s==='vencido') txt='Vencido há '+Math.abs(diasEntre(hoje(),p.venc))+'d';
   if(s==='aberto'){ const d=diasEntre(hoje(),p.venc); if(d<=15) txt='Em '+d+'d'; }
   return '<span class="tag t-'+s+'">'+txt+'</span>';
@@ -744,12 +807,12 @@ function renderReceber(){
     <th>Vencimento</th><th>Cliente</th><th>Pedido</th><th>Parc.</th><th class="num">Valor</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th></th>
     </tr></thead><tbody>`+ps.map(p=>{
       const pg=pagoDe(p), sd=saldoDe(p);
-      return `<tr><td>${dbr(p.venc)}</td><td>${esc(cliDe(p.pedido.clienteId).fantasia||cliDe(p.pedido.clienteId).nome)}</td>
+      return `<tr class="${sd<=0?'lpago':''}"><td>${dbr(p.venc)}</td><td>${esc(cliDe(p.pedido.clienteId).fantasia||cliDe(p.pedido.clienteId).nome)}</td>
       <td><a class="lnk" onclick="verPedido('${p.pedido.id}')">#${esc(p.pedido.num)}</a></td><td>${p.rot}</td>
       <td class="num">${c2r(p.valor)}</td><td class="num">${pg?c2r(pg):'—'}</td>
       <td class="num" style="font-weight:700">${sd>0?c2r(sd):'—'}</td><td>${tagDe(p)}</td>
       <td>${sd>0?`<button class="btn sm" onclick="abrirBaixa('${p.pedido.id}',${p.idx})">Dar baixa</button>`
-                :`<button class="btn sm ghost" onclick="estornar('${p.pedido.id}',${p.idx})">Estornar</button>`}</td></tr>`;
+                :`<button class="btn sm ghost" onclick="abrirBaixa('${p.pedido.id}',${p.idx})">Ver</button> <button class="btn sm ghost" onclick="estornar('${p.pedido.id}',${p.idx})">Estornar</button>`}</td></tr>`;
     }).join('')+`</tbody></table>
     <div class="tot"><span>${ps.length} parcela(s)</span><span>Saldo: ${c2r(tSaldo)} &nbsp;·&nbsp; <span style="color:var(--bad)">Vencido: ${c2r(tVenc)}</span></span></div>`
     : '<div class="empty">Nenhuma parcela com esses filtros.</div>';
@@ -874,44 +937,112 @@ function abrirCliente(id){
     </div>
     <div class="row r2">
       <div class="fld"><label>Nome fantasia</label><input type="text" id="cFant" value="${esc(c.fantasia||'')}"></div>
+      <div class="fld"><label>Inscrição estadual</label><input type="text" id="cIe" value="${esc(c.ie||'')}"></div>
+    </div>
+    <div class="lgsep"></div>
+    <div class="row r2">
       <div class="fld"><label>Telefone</label><input type="text" id="cFone" value="${esc(c.fone||'')}"></div>
+      <div class="fld"><label>E-mail</label><input type="email" id="cMail" value="${esc(c.email||'')}"></div>
     </div>
     <div class="row r2">
+      <div class="fld"><label>Pessoa de contato</label><input type="text" id="cCont" value="${esc(c.contato||'')}"></div>
       <div class="fld"><label>Cidade / UF</label><input type="text" id="cCid" value="${esc(c.cidade||'')}"></div>
+    </div>
+    <div class="lgsep"></div>
+    <div class="fld"><label>Endereço de entrega</label><input type="text" id="cEnd" value="${esc(c.endereco||'')}" placeholder="Rua, número, complemento"></div>
+    <div class="row r3">
+      <div class="fld"><label>Bairro</label><input type="text" id="cBai" value="${esc(c.bairro||'')}"></div>
+      <div class="fld"><label>CEP</label><input type="text" id="cCep" value="${esc(c.cep||'')}"></div>
+      <div class="fld"><label>Transportadora</label><input type="text" id="cTra" value="${esc(c.transp||'')}"></div>
+    </div>
+    <div class="lgsep"></div>
+    <div class="row r2">
       <div class="fld"><label>Limite de crédito (R$)</label><input type="number" id="cLim" step="0.01" value="${c.limite?(c.limite/100).toFixed(2):''}"></div>
+      <div class="fld"><label>Prazo habitual</label><input type="text" id="cPz" value="${esc(c.prazo||'')}" placeholder="ex.: 30/60/90"></div>
     </div>
     <div class="fld"><label>Observação</label><input type="text" id="cObs" value="${esc(c.obs||'')}"></div>`,
     [{txt:'Salvar',cls:'btn',fn:()=>{
       const nome=document.getElementById('cNome').value.trim();
       if(!nome){ toast('Informe o nome'); return; }
-      const dados={nome,doc:document.getElementById('cDoc').value.trim(),fantasia:document.getElementById('cFant').value.trim(),
-        fone:document.getElementById('cFone').value.trim(),cidade:document.getElementById('cCid').value.trim(),
-        limite:r2c(document.getElementById('cLim').value),obs:document.getElementById('cObs').value.trim()};
+      const v=i=>document.getElementById(i).value.trim();
+      const dados={nome,doc:v('cDoc'),fantasia:v('cFant'),ie:v('cIe'),fone:v('cFone'),email:v('cMail'),
+        contato:v('cCont'),cidade:v('cCid'),endereco:v('cEnd'),bairro:v('cBai'),cep:v('cCep'),
+        transp:v('cTra'),prazo:v('cPz'),limite:r2c(document.getElementById('cLim').value),obs:v('cObs')};
       if(id) Object.assign(DB.clientes.find(x=>x.id===id),dados);
       else DB.clientes.push(Object.assign({id:uid()},dados));
       save(); fecharModal(); renderAll(); toast('Cliente salvo');
     }}]);
 }
-function fichaCliente(id){
+let ABA_FICHA='parcelas';
+function fichaCliente(id,aba){
   go('clientes');
-  const c=cliDe(id); const peds=DB.pedidos.filter(p=>p.clienteId===id);
+  if(aba) ABA_FICHA=aba;
+  const c=cliDe(id);
   const ps=todasParcelas().filter(p=>p.pedido.clienteId===id).sort((a,b)=>a.venc<b.venc?-1:1);
+  const recs=recebimentosDe(id);
   const box=document.getElementById('fichaCli'); box.classList.remove('hidden');
-  box.innerHTML=`<h2>Ficha — ${esc(c.nome)} <small>${esc(c.doc||'')} · ${esc(c.cidade||'')} · ${esc(c.fone||'')}</small>
+  const contatos=[c.doc,c.ie&&('IE '+c.ie),c.fone,c.email,c.contato&&('a/c '+c.contato)].filter(Boolean).join(' · ');
+  const entrega=[c.endereco,c.bairro,c.cidade,c.cep&&('CEP '+c.cep)].filter(Boolean).join(' · ');
+
+  box.innerHTML=`<h2>Ficha — ${esc(c.nome)} <small>${esc(contatos||'sem dados de contato')}</small>
     <span><button class="btn sm" onclick="imprimirExtrato('${id}')">Imprimir extrato</button>
+    <button class="btn sm ghost" onclick="abrirCliente('${id}')">Editar cadastro</button>
     <button class="btn sm ghost" onclick="document.getElementById('fichaCli').classList.add('hidden')">fechar</button></span></h2>
+    ${entrega?`<div class="pad" style="padding-bottom:0"><div class="note"><b>Entrega:</b> ${esc(entrega)}${c.transp?' · <b>Transp.:</b> '+esc(c.transp):''}</div></div>`:''}
     <div class="pad" style="padding-bottom:0"><div class="kpis" style="grid-template-columns:repeat(3,1fr)">
       <div class="kpi"><div class="lab">Total comprado</div><div class="val" style="font-size:20px">${c2r(totalCliente(id))}</div></div>
       <div class="kpi bad"><div class="lab">Saldo devedor</div><div class="val" style="font-size:20px">${c2r(saldoCliente(id))}</div></div>
       <div class="kpi ok"><div class="lab">Já pago</div><div class="val" style="font-size:20px">${c2r(totalCliente(id)-saldoCliente(id))}</div></div>
     </div></div>
-    <table><thead><tr><th>Pedido</th><th>Data</th><th>Parc.</th><th>Vencimento</th><th class="num">Valor</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>
-    ${ps.map(p=>`<tr><td><a class="lnk" onclick="verPedido('${p.pedido.id}')">#${esc(p.pedido.num)}</a></td><td>${dbr(p.pedido.data)}</td>
-      <td>${p.rot}</td><td>${dbr(p.venc)}</td><td class="num">${c2r(p.valor)}</td>
-      <td class="num" style="font-weight:700">${saldoDe(p)>0?c2r(saldoDe(p)):'—'}</td><td>${tagDe(p)}</td>
-      <td>${saldoDe(p)>0?`<button class="btn sm" onclick="abrirBaixa('${p.pedido.id}',${p.idx})">Baixa</button>`:''}</td></tr>`).join('')}
-    </tbody></table>${ps.length?'':'<div class="empty">Sem pedidos.</div>'}`;
+    <div class="abas">
+      <a class="${ABA_FICHA==='parcelas'?'on':''}" onclick="fichaCliente('${id}','parcelas')">Pedidos e parcelas</a>
+      <a class="${ABA_FICHA==='hist'?'on':''}" onclick="fichaCliente('${id}','hist')">Histórico de pagamentos ${recs.length?'<b>'+recs.length+'</b>':''}</a>
+    </div>
+    ${ABA_FICHA==='hist'?histHTML(id,recs):parcHTML(id,ps)}`;
   box.scrollIntoView({behavior:'smooth'});
+}
+function parcHTML(id,ps){
+  if(!ps.length) return '<div class="empty">Sem pedidos.</div>';
+  return `<table><thead><tr><th>Pedido</th><th>Data</th><th>Parc.</th><th>Vencimento</th><th class="num">Valor</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>
+    ${ps.map(p=>{const q=statusDe(p)==='pago';
+      return `<tr class="${q?'lpago':''}"><td><a class="lnk" onclick="verPedido('${p.pedido.id}')">#${esc(p.pedido.num)}</a></td><td>${dbr(p.pedido.data)}</td>
+      <td>${p.rot}</td><td>${dbr(p.venc)}</td><td class="num">${c2r(p.valor)}</td>
+      <td class="num">${pagoDe(p)?c2r(pagoDe(p)):'—'}</td>
+      <td class="num" style="font-weight:700">${saldoDe(p)>0?c2r(saldoDe(p)):'—'}</td><td>${tagDe(p)}</td>
+      <td>${saldoDe(p)>0?`<button class="btn sm" onclick="abrirBaixa('${p.pedido.id}',${p.idx})">Baixa</button>`
+        :`<button class="btn sm ghost" onclick="abrirBaixa('${p.pedido.id}',${p.idx})">Ver</button>`}</td></tr>`;}).join('')}
+    </tbody></table>`;
+}
+function recebimentosDe(id){
+  const out=[];
+  DB.pedidos.filter(p=>p.clienteId===id).forEach(p=>(p.parcelas||[]).forEach((x,i)=>(x.pagos||[]).forEach((g,k)=>
+    out.push({pedido:p,idx:i,k,g,rot:(i+1)+'/'+p.parcelas.length}))));
+  return out.sort((a,b)=>a.g.data<b.g.data?1:-1);
+}
+function histHTML(id,recs){
+  if(!recs.length) return '<div class="empty">Nenhum pagamento registrado para este cliente ainda.</div>';
+  const tot=recs.reduce((s,r)=>s+r.g.valor,0);
+  const porForma={}; recs.forEach(r=>{ const f=r.g.forma||'Não informado'; porForma[f]=(porForma[f]||0)+r.g.valor; });
+  return `<div class="pad" style="padding-bottom:0"><div class="note ok">
+      <b>${recs.length} pagamento(s)</b> · total recebido <b>${c2r(tot)}</b> · ${Object.keys(porForma).map(f=>esc(f)+' '+c2r(porForma[f])).join(' · ')}
+    </div></div>
+    <table><thead><tr><th>Data</th><th>Pedido</th><th>Parcela</th><th>Forma</th><th>Observação</th><th class="num">Valor</th><th>Comprovante</th><th></th></tr></thead><tbody>
+    ${recs.map(r=>`<tr><td><b>${dbr(r.g.data)}</b></td>
+      <td><a class="lnk" onclick="verPedido('${r.pedido.id}')">#${esc(r.pedido.num)}</a></td>
+      <td>${r.rot}</td><td>${esc(r.g.forma||'—')}</td><td>${esc(r.g.obs||'')}</td>
+      <td class="num" style="font-weight:700;color:var(--ok)">${c2r(r.g.valor)}</td>
+      <td>${r.g.comp?(r.g.comp.dados?`<a class="lnk" onclick="verComprovante('${r.pedido.id}',${r.idx},${r.k})">ver arquivo</a>`
+          :'<small class="mini">'+esc(r.g.comp.nome)+'</small>'):'—'}</td>
+      <td><button class="btn sm ghost" onclick="estornarUm('${r.pedido.id}',${r.idx},${r.k},'${id}')">Estornar</button></td></tr>`).join('')}
+    </tbody></table>
+    <div class="tot"><span>Total recebido deste cliente</span><span>${c2r(tot)}</span></div>`;
+}
+function estornarUm(pedidoId,idx,k,cliId){
+  const p=DB.pedidos.find(x=>x.id===pedidoId); const x=p.parcelas[idx]; const g=x.pagos[k];
+  if(!confirm('Estornar o recebimento de '+c2r(g.valor)+' de '+dbr(g.data)+'?\n\nA parcela volta a ficar em aberto por esse valor.')) return;
+  x.pagos.splice(k,1); save(); renderAll();
+  if(cliId) fichaCliente(cliId,'hist');
+  toast('Recebimento estornado');
 }
 
 /* ================= PEDIDOS ================= */
@@ -931,28 +1062,33 @@ function renderPedidos(){
     return true;
   });
   document.getElementById('tblPedidos').innerHTML = ped.length? `<table><thead><tr>
-    <th>Pedido</th><th>Data</th><th>Cliente</th><th>Itens</th><th class="num">Total</th><th>Condição</th><th class="num">Pago</th><th class="num">Saldo</th><th></th>
+    <th>Pedido</th><th>Data</th><th>Cliente</th><th>Itens</th><th class="num">Total</th><th>Condição</th><th class="num">Pago</th><th class="num">Saldo</th><th>Situação</th><th></th>
     </tr></thead><tbody>`+ped.map(p=>{
       const sd=(p.parcelas||[]).reduce((x,y)=>x+Math.max(0,saldoDe(y)),0);
       const pg=p.total-sd;
-      return `<tr><td><b>#${esc(p.num)}</b></td><td>${dbr(p.data)}</td><td>${esc(cliDe(p.clienteId).fantasia||cliDe(p.clienteId).nome)}</td>
+      return `<tr class="${sd<=0?'lpago':''}"><td><b>#${esc(p.num)}</b></td><td>${dbr(p.data)}</td><td>${esc(cliDe(p.clienteId).fantasia||cliDe(p.clienteId).nome)}</td>
       <td>${(p.itens||[]).length} item(ns)</td><td class="num">${c2r(p.total)}</td><td>${esc(p.cond||'—')}</td>
-      <td class="num">${pg>0?c2r(pg):'—'}</td><td class="num" style="font-weight:700">${sd>0?c2r(sd):'<span class="tag t-pago">Quitado</span>'}</td>
-      <td><button class="btn sm ghost" onclick="verPedido('${p.id}')">Detalhe</button> <button class="btn sm ghost" onclick="excluirPedido('${p.id}')">Excluir</button></td></tr>`;
+      <td class="num">${pg>0?c2r(pg):'—'}</td><td class="num" style="font-weight:700">${sd>0?c2r(sd):'—'}</td>
+      <td>${sd<=0?'<span class="tag t-pago">✓ Pago</span>':(pg>0?'<span class="tag t-parcial">Parcial</span>':'<span class="tag t-aberto">Em aberto</span>')}</td>
+      <td><button class="btn sm ghost" onclick="verPedido('${p.id}')">Detalhe</button> <button class="btn sm ghost" onclick="editarPedido('${p.id}')">Editar</button> <button class="btn sm ghost" onclick="excluirPedido('${p.id}')">Excluir</button></td></tr>`;
     }).join('')+'</tbody></table>' : '<div class="empty">Nenhum pedido lançado ainda.</div>';
 }
 function verPedido(id){
+  const p=DB.pedidos.find(x=>x.id===id);
+  if(!p){ toast('Pedido não encontrado'); return; }
   go('pedidos');
-  const p=DB.pedidos.find(x=>x.id===id); const c=cliDe(p.clienteId);
+  const c=cliDe(p.clienteId);
   const box=document.getElementById('detPedido'); box.classList.remove('hidden');
   box.innerHTML=`<h2>Pedido #${esc(p.num)} — ${esc(c.nome)} <small>${dbr(p.data)} · ${esc(p.obs||'')}</small>
-    <button class="btn sm ghost" onclick="document.getElementById('detPedido').classList.add('hidden')">fechar</button></h2>
+    <span><button class="btn sm" onclick="editarPedido('${p.id}')">Editar pedido</button>
+    <button class="btn sm ghost" onclick="document.getElementById('detPedido').classList.add('hidden')">fechar</button></span></h2>
     ${(p.itens||[]).length?`<table><thead><tr><th>Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unit.</th><th class="num">Total</th></tr></thead><tbody>
     ${p.itens.map(i=>`<tr><td>${esc(i.cod)}</td><td>${esc(i.desc)}</td><td>${esc(i.un||'')}</td><td class="num">${i.qtd.toLocaleString('pt-BR')}</td><td class="num">${c2n(i.unit)}</td><td class="num">${c2n(i.total)}</td></tr>`).join('')}
     </tbody></table>`:''}
+    ${p.desc?`<div class="tot" style="border:0;padding-bottom:0;font-size:13px;font-weight:400;color:var(--muted)"><span>Desconto concedido</span><span>− ${c2r(p.desc)}</span></div>`:''}
     <div class="tot"><span>Total do pedido</span><span>${c2r(p.total)}</span></div>
     <table><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>
-    ${p.parcelas.map((x,i)=>`<tr><td><b>${i+1}/${p.parcelas.length}</b></td><td>${dbr(x.venc)}</td><td class="num">${c2r(x.valor)}</td>
+    ${p.parcelas.map((x,i)=>`<tr class="${saldoDe(x)<=0?'lpago':''}"><td><b>${i+1}/${p.parcelas.length}</b></td><td>${dbr(x.venc)}</td><td class="num">${c2r(x.valor)}</td>
       <td class="num">${pagoDe(x)?c2r(pagoDe(x)):'—'}</td><td class="num" style="font-weight:700">${saldoDe(x)>0?c2r(saldoDe(x)):'—'}</td>
       <td>${tagDe(x)}</td><td>${saldoDe(x)>0?`<button class="btn sm" onclick="abrirBaixa('${p.id}',${i})">Baixa</button>`:`<button class="btn sm ghost" onclick="abrirBaixa('${p.id}',${i})">Ver</button>`}</td></tr>`).join('')}
     </tbody></table>
@@ -1031,6 +1167,47 @@ function distribuirResto(total){
 
 /* ================= SALVAR PEDIDO ================= */
 let ITENS=[];
+function pintaItens(){
+  const box=document.getElementById('itensBox');
+  const bruto=ITENS.reduce((s,i)=>s+i.total,0);
+  box.innerHTML=`
+    <div class="fld" style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
+      <label style="margin:0">Produtos do pedido${ITENS.length?' ('+ITENS.length+')':''}</label>
+      <button class="btn sm ghost" onclick="addItem()">+ Adicionar produto</button></div>
+    ${ITENS.length?`<table style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
+    <thead><tr><th style="padding-left:12px">Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unitário</th><th class="num">Total</th><th style="padding-right:12px"></th></tr></thead>
+    <tbody>${ITENS.map((i,k)=>`<tr>
+      <td style="padding-left:12px"><input class="ed" style="width:88px" value="${esc(i.cod||'')}" onchange="ITENS[${k}].cod=this.value"></td>
+      <td><input class="ed" style="width:100%;min-width:170px" value="${esc(i.desc||'')}" onchange="ITENS[${k}].desc=this.value"></td>
+      <td><input class="ed" style="width:48px" value="${esc(i.un||'')}" onchange="ITENS[${k}].un=this.value"></td>
+      <td class="num"><input class="ed num" type="number" step="0.001" style="width:86px" value="${i.qtd}" onchange="itemCalc(${k},'qtd',this.value)"></td>
+      <td class="num"><input class="ed num" type="number" step="0.01" style="width:96px" value="${(i.unit/100).toFixed(2)}" onchange="itemCalc(${k},'unit',this.value)"></td>
+      <td class="num"><input class="ed num" type="number" step="0.01" style="width:106px;font-weight:700" value="${(i.total/100).toFixed(2)}" onchange="itemCalc(${k},'total',this.value)"></td>
+      <td style="padding-right:12px"><a class="lnk" style="color:var(--bad)" onclick="ITENS.splice(${k},1);pintaItens()">✕</a></td></tr>`).join('')}
+    </tbody></table>
+    <div class="row r2" style="margin-top:10px">
+      <div class="fld"><label>Soma dos produtos</label><input type="text" value="${c2n(bruto)}" disabled></div>
+      <div class="fld"><label>Desconto (R$)</label><input type="number" step="0.01" id="dDesc" value="${(DESC/100).toFixed(2)}" onchange="DESC=r2c(this.value);pintaItens()"></div>
+    </div>
+    <div class="note" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Total dos produtos menos o desconto: <b>${c2r(bruto-DESC)}</b></span>
+      <button class="btn sm" onclick="usarTotalItens()">Usar como total do pedido</button></div>`:''}`;
+}
+let DESC=0;
+function itemCalc(k,campo,valor){
+  const i=ITENS[k];
+  if(campo==='qtd'){ i.qtd=parseFloat(String(valor).replace(',','.'))||0; i.total=Math.round(i.qtd*i.unit); }
+  if(campo==='unit'){ i.unit=r2c(valor); i.total=Math.round(i.qtd*i.unit); }
+  if(campo==='total'){ i.total=r2c(valor); if(i.qtd) i.unit=Math.round(i.total/i.qtd); }
+  pintaItens();
+}
+function addItem(){ ITENS.push({cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}); pintaItens(); }
+function usarTotalItens(){
+  const t=ITENS.reduce((s,i)=>s+i.total,0)-DESC;
+  document.getElementById('dTotal').value=(t/100).toFixed(2);
+  calcParcelas(); toast('Total atualizado para '+c2r(t));
+}
+let EDIT=null;
 function salvarPedido(){
   const nome=document.getElementById('dCli').value.trim();
   const total=r2c(document.getElementById('dTotal').value);
@@ -1041,6 +1218,10 @@ function salvarPedido(){
   if(soma!==total && !confirm('A soma das parcelas ('+c2r(soma)+') é diferente do total ('+c2r(total)+'). Salvar assim mesmo?')) return;
 
   const doc=document.getElementById('dDoc').value.trim();
+  const num=document.getElementById('dNum').value.trim()||String(DB.pedidos.length+1);
+  const rep=DB.pedidos.find(x=>x.num===num&&(!EDIT||x.id!==EDIT));
+  if(rep && !confirm('Já existe o pedido #'+num+'. O banco não aceita número repetido — quer salvar assim mesmo?')) return;
+
   let c=DB.clientes.find(x=>(doc&&x.doc===doc)||x.nome.toLowerCase()===nome.toLowerCase());
   if(!c){
     c={id:uid(),nome,doc,fantasia:document.getElementById('dFant').value.trim(),
@@ -1054,20 +1235,60 @@ function salvarPedido(){
   }
   const nEnt=PARC[0]&&PARC[0].ent?1:0;
   const cond=(nEnt?'Entrada + ':'')+(PARC.length-nEnt)+'x';
-  DB.pedidos.push({
-    id:uid(), num:document.getElementById('dNum').value.trim()||String(DB.pedidos.length+1),
-    data:document.getElementById('dData').value||hoje(), clienteId:c.id, total, cond,
-    obs:document.getElementById('dObs').value.trim(), itens:ITENS.slice(),
-    parcelas:PARC.map(p=>({venc:p.venc,valor:p.valor,pagos:[]}))
-  });
+  const base={num, data:document.getElementById('dData').value||hoje(), clienteId:c.id, total, cond,
+    desc:DESC, obs:document.getElementById('dObs').value.trim(), itens:ITENS.slice()};
+
+  if(EDIT){
+    const alvo=EDIT;
+    const p=DB.pedidos.find(x=>x.id===alvo);
+    const antigas=p.parcelas||[];
+    const perdidas=antigas.slice(PARC.length).reduce((s,x)=>s+(x.pagos||[]).length,0);
+    if(perdidas && !confirm('O pedido passou de '+antigas.length+' para '+PARC.length+' parcelas.\n\n'+perdidas+' recebimento(s) das parcelas removidas serão apagados. Continuar?')) return;
+    Object.assign(p,base);
+    p.parcelas=PARC.map((q,i)=>({venc:q.venc,valor:q.valor,pagos:(antigas[i]&&antigas[i].pagos)||[]}));
+    const excedeu=p.parcelas.find(x=>pagoDe(x)>x.valor);
+    save(); limparNovo(); renderAll();
+    toast('Pedido #'+num+' atualizado');
+    if(excedeu) setTimeout(()=>alert('Atenção: uma parcela ficou com valor menor do que já foi recebido nela. Confira o pedido.'),300);
+    go('pedidos'); verPedido(alvo);
+    return;
+  }
+  DB.pedidos.push(Object.assign({id:uid(),parcelas:PARC.map(q=>({venc:q.venc,valor:q.valor,pagos:[]}))},base));
   save(); limparNovo(); toast('Pedido salvo — parcelas geradas'); go('pedidos');
 }
+function editarPedido(id){
+  const p=DB.pedidos.find(x=>x.id===id); if(!p) return;
+  const c=cliDe(p.clienteId);
+  go('novo');
+  EDIT=id;
+  document.getElementById('dNum').value=p.num;
+  document.getElementById('dData').value=p.data||hoje();
+  document.getElementById('dCli').value=c.nome||'';
+  document.getElementById('dDoc').value=c.doc||'';
+  document.getElementById('dFant').value=c.fantasia||'';
+  document.getElementById('dCid').value=c.cidade||'';
+  document.getElementById('dFone').value=c.fone||'';
+  document.getElementById('dObs').value=p.obs||'';
+  document.getElementById('dTotal').value=(p.total/100).toFixed(2);
+  ITENS=(p.itens||[]).map(i=>Object.assign({},i));
+  DESC=p.desc||0;
+  pintaItens();
+  PARC=(p.parcelas||[]).map(x=>({venc:x.venc,valor:x.valor}));
+  pintaParc(p.total);
+  document.getElementById('btSalvarPed').textContent='Salvar alterações do pedido #'+p.num;
+  const pagos=(p.parcelas||[]).reduce((s,x)=>s+(x.pagos||[]).length,0);
+  msg(pagos?('<b>Editando o pedido #'+esc(p.num)+'.</b> Ele já tem '+pagos+' recebimento(s) — eles ficam presos à posição da parcela (1ª, 2ª, 3ª...). Se você mudar valores ou datas, os pagamentos continuam onde estão.')
+          :('<b>Editando o pedido #'+esc(p.num)+'.</b> Altere o que precisar e clique em salvar. Para desistir, clique em Limpar.'),'');
+  window.scrollTo(0,0);
+}
 function limparNovo(){
+  EDIT=null;
   ['dNum','dCli','dDoc','dFant','dCid','dFone','dObs'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('dTotal').value=''; document.getElementById('dData').value=hoje();
   document.getElementById('pEnt').value=0; document.getElementById('pQtd').value=3;
   document.getElementById('pInt').value=30; document.getElementById('pIni').value='';
-  ITENS=[]; document.getElementById('itensBox').innerHTML=''; document.getElementById('pdfMsg').innerHTML='';
+  ITENS=[]; DESC=0; EDIT=null; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
+  const b=document.getElementById('btSalvarPed'); if(b) b.textContent='Salvar pedido';
   calcParcelas();
 }
 
@@ -1186,13 +1407,8 @@ function aplicar(R){
   if(R.fone) document.getElementById('dFone').value=R.fone;
   if(R.obs) document.getElementById('dObs').value=R.obs;
   if(R.total) document.getElementById('dTotal').value=(R.total/100).toFixed(2);
-  ITENS=R.itens||[];
-  document.getElementById('itensBox').innerHTML = ITENS.length?`
-    <div class="fld" style="margin-top:6px"><label>Itens lidos do PDF (${ITENS.length})</label></div>
-    <table style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
-    <thead><tr><th style="padding-left:12px">Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unit.</th><th class="num" style="padding-right:12px">Total</th></tr></thead>
-    <tbody>${ITENS.map(i=>`<tr><td style="padding-left:12px">${esc(i.cod)}</td><td>${esc(i.desc)}</td><td>${esc(i.un)}</td>
-      <td class="num">${i.qtd.toLocaleString('pt-BR')}</td><td class="num">${c2n(i.unit)}</td><td class="num" style="padding-right:12px">${c2n(i.total)}</td></tr>`).join('')}</tbody></table>`:'';
+  ITENS=R.itens||[]; DESC=0;
+  pintaItens();
   const ok=[R.nome&&'cliente',R.doc&&'CNPJ',R.data&&'data',R.total&&'valor total',ITENS.length&&(ITENS.length+' itens')].filter(Boolean).join(', ');
   msg('<b>PDF lido ✓</b> — reconheci: '+(ok||'pouca coisa')+'. Confira os campos ao lado antes de salvar.','ok');
   calcParcelas();
@@ -1255,7 +1471,9 @@ function imprimirExtrato(id){
   @media print{body{padding:0}}</style></head><body>
   <div class="em"><b>${esc(DB.cfg.empresa||'')}</b></div>
   <h1>Extrato de conta — ${esc(c.nome)}</h1>
-  <h2>${esc(c.doc||'')} ${c.cidade?'· '+esc(c.cidade):''} ${c.fone?'· '+esc(c.fone):''}<br>Emitido em ${dbr(hoje())}</h2>
+  <h2>${[c.doc,c.ie&&('IE '+c.ie),c.cidade,c.fone,c.email].filter(Boolean).map(esc).join(' · ')}
+  ${c.endereco?'<br>Entrega: '+esc([c.endereco,c.bairro,c.cidade,c.cep&&('CEP '+c.cep)].filter(Boolean).join(', ')):''}
+  <br>Emitido em ${dbr(hoje())}</h2>
   <table><thead><tr><th>Pedido</th><th>Data pedido</th><th>Parcela</th><th>Vencimento</th><th class="n">Valor</th><th class="n">Pago</th><th class="n">Saldo</th><th>Situação</th></tr></thead><tbody>
   ${ps.map(p=>{const s=statusDe(p);return `<tr class="${s==='vencido'?'r':''}"><td>#${esc(p.pedido.num)}</td><td>${dbr(p.pedido.data)}</td><td>${p.rot}</td>
     <td>${dbr(p.venc)}</td><td class="n">${c2n(p.valor)}</td><td class="n">${pagoDe(p)?c2n(pagoDe(p)):'—'}</td>
