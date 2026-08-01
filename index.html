@@ -105,18 +105,22 @@
   @media(max-width:760px){aside{position:fixed;bottom:0;top:auto;width:100%;height:auto;flex-direction:row;padding:0;z-index:40}aside .logo,.sidefoot{display:none}nav{display:flex;width:100%}nav a{flex:1;flex-direction:column;font-size:10px;gap:3px;padding:9px 2px;border-left:0;border-top:3px solid transparent;text-align:center}nav a.active{border-left:0;border-top-color:#3b82f6}body{flex-direction:column-reverse}main{padding:16px 14px 80px}.kpis{grid-template-columns:1fr 1fr;gap:10px}}
 
 /* ---- login ---- */
-#login{position:fixed;inset:0;z-index:200;background:#0b1220;display:flex;align-items:center;justify-content:center;padding:20px}
+#login{position:fixed;inset:0;z-index:200;background:linear-gradient(160deg,#0f172a,#1e293b);display:flex;align-items:center;justify-content:center;padding:20px}
 #login.hidden{display:none}
-.lgbox{width:100%;max-width:380px;background:var(--card);border:1px solid var(--linha);border-radius:16px;padding:30px 28px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
-.lglogo{text-align:center;margin-bottom:22px}
-.lglogo b{display:block;font-size:15px;letter-spacing:.6px}
-.lglogo span{display:block;font-size:11px;color:var(--fraco);margin-top:3px;text-transform:uppercase;letter-spacing:1px}
-.lgmsg{font-size:12px;color:var(--fraco);min-height:17px;margin-bottom:12px;text-align:center;line-height:1.4}
-.lgsep{height:1px;background:var(--linha);margin:16px 0}
-.lgbt{width:100%;justify-content:center;margin-top:16px;padding:11px}
-.lgpe{margin-top:16px;text-align:center;display:flex;flex-direction:column;gap:7px}
-.lgpe a{font-size:11px;color:var(--fraco);cursor:pointer;text-decoration:underline}
-.lgpe a:hover{color:var(--txt)}
+.lgbox{width:100%;max-width:390px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:34px 30px;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.lglogo{text-align:center;margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.lglogo b{display:block;font-size:15px;letter-spacing:.5px;color:var(--ink)}
+.lglogo span{display:block;font-size:10.5px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:1.2px}
+.lgmsg{font-size:12px;color:var(--muted);min-height:16px;margin-bottom:14px;text-align:center;line-height:1.45}
+.lgsep{height:1px;background:var(--line);margin:18px 0}
+.lgbox .fld{margin-bottom:13px}
+.lgbox .fld label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:5px}
+.lgbox .fld input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);box-sizing:border-box}
+.lgbox .fld input:focus{outline:0;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.lgbt{width:100%;justify-content:center;margin-top:20px;padding:12px;font-size:14px}
+.lgpe{margin-top:18px;text-align:center;display:flex;flex-direction:column;gap:8px}
+.lgpe a{font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline}
+.lgpe a:hover{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -380,7 +384,7 @@ let SYNC=null, ESPELHO={c:{},p:{}};
 function sbCarregaCfg(){
   try{ const s=JSON.parse(localStorage.getItem('sb_cfg')||'{}');
     if(s.url) SB.url=String(s.url).replace(/\/+$/,'');
-    SB.key=s.key||''; }catch(e){}
+    if(s.key) SB.key=s.key; }catch(e){}
   try{ const s=JSON.parse(localStorage.getItem('sb_sessao')||'{}');
     SB.tok=s.tok||null; SB.ref=s.ref||null; SB.exp=s.exp||0; SB.email=s.email||''; }catch(e){}
 }
