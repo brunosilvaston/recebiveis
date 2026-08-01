@@ -117,6 +117,11 @@
   @media(max-width:760px){aside{position:fixed;bottom:0;top:auto;width:100%;height:auto;flex-direction:row;padding:0;z-index:40}aside .logo,.sidefoot{display:none}nav{display:flex;width:100%}nav a{flex:1;flex-direction:column;font-size:10px;gap:3px;padding:9px 2px;border-left:0;border-top:3px solid transparent;text-align:center}nav a.active{border-left:0;border-top-color:#3b82f6}body{flex-direction:column-reverse}main{padding:16px 14px 80px}.kpis{grid-template-columns:1fr 1fr;gap:10px}}
 
 /* ---- login ---- */
+#novaSenha{position:fixed;inset:0;z-index:210;background:linear-gradient(160deg,#0f172a,#1e293b);display:flex;align-items:center;justify-content:center;padding:20px}
+#novaSenha.hidden{display:none}
+#novaSenha .fld{margin-bottom:13px}
+#novaSenha .fld label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:5px}
+#novaSenha .fld input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--ink);box-sizing:border-box}
 #login{position:fixed;inset:0;z-index:200;background:linear-gradient(160deg,#0f172a,#1e293b);display:flex;align-items:center;justify-content:center;padding:20px}
 #login.hidden{display:none}
 .lgbox{width:100%;max-width:390px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:34px 30px;box-shadow:0 24px 60px rgba(0,0,0,.45)}
@@ -138,10 +143,21 @@
 </head>
 <body>
 
+<!-- ============ DEFINIR SENHA (convite / recuperação) ============ -->
+<div id="novaSenha" class="hidden">
+  <div class="lgbox">
+    <div class="lglogo"><b>CONTROLE DE RECEBÍVEIS</b><span id="nsSub">Crie a sua senha de acesso</span></div>
+    <div id="nsMsg" class="lgmsg">Escolha uma senha para entrar no sistema daqui em diante.</div>
+    <div class="fld"><label>Nova senha</label><input type="password" id="nsA" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+    <div class="fld"><label>Repita a senha</label><input type="password" id="nsB" autocomplete="new-password" onkeydown="if(event.key==='Enter')salvarSenha()"></div>
+    <button class="btn lgbt" onclick="salvarSenha()">Salvar e entrar</button>
+  </div>
+</div>
+
 <!-- ============ LOGIN ============ -->
 <div id="login" class="hidden">
   <div class="lgbox">
-    <div class="lglogo"><b>CONTROLE DE RECEBÍVEIS</b><span>Abou Khir Importações</span></div>
+    <div class="lglogo"><b>CONTROLE DE RECEBÍVEIS</b><span>Pedidos, parcelas e saldos</span></div>
     <div id="lgMsg" class="lgmsg"></div>
     <div id="lgCfg">
       <div class="fld"><label>Endereço do banco</label><input type="text" id="lgUrl" placeholder="https://xxxxx.supabase.co" autocomplete="off"></div>
@@ -152,6 +168,7 @@
     <div class="fld"><label>Senha</label><input type="password" id="lgSenha" autocomplete="current-password" onkeydown="if(event.key==='Enter')fazerLogin()"></div>
     <button class="btn lgbt" onclick="fazerLogin()">Entrar</button>
     <div class="lgpe">
+      <a onclick="esqueciSenha()">esqueci minha senha</a>
       <a onclick="mostrarCfg()">alterar endereço do banco</a>
       <a onclick="usarLocal()">usar sem banco (só neste computador)</a>
     </div>
@@ -344,13 +361,13 @@ var PDFOK=false;
 try{ pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; PDFOK=true; }catch(e){}
 
 const KEY='recebiveis_v1';
-let DB={cfg:{empresa:'ABOU KHIR IMPORTAÇÕES'},clientes:[],pedidos:[]};
+let DB={cfg:{empresa:''},clientes:[],pedidos:[]};
 let MEM=false;
 
 function load(){
   try{ const r=localStorage.getItem(KEY); if(r) DB=JSON.parse(r); }
   catch(e){ MEM=true; }
-  if(!DB.cfg) DB.cfg={empresa:'ABOU KHIR IMPORTAÇÕES'};
+  if(!DB.cfg) DB.cfg={empresa:''};
   document.getElementById('logoNome').textContent=DB.cfg.empresa||'CONTROLE DE RECEBÍVEIS';
   st();
 }
@@ -482,7 +499,7 @@ async function baixarTudo(){
     rest('GET','config?select=*')
   ]);
   const emp=(cf||[]).find(x=>x.chave==='empresa');
-  const nb={cfg:{empresa:emp?emp.valor:(DB.cfg.empresa||'ABOU KHIR IMPORTAÇÕES')},clientes:[],pedidos:[]};
+  const nb={cfg:{empresa:emp?emp.valor:(DB.cfg.empresa||'')},clientes:[],pedidos:[]};
   (cl||[]).forEach(c=>nb.clientes.push({id:c.id,nome:c.nome,fantasia:c.fantasia||'',doc:c.doc||'',cidade:c.cidade||'',
     fone:c.fone||'',limite:+c.limite||0,obs:c.obs||'',email:c.email||'',ie:c.ie||'',contato:c.contato||'',
     endereco:c.endereco||'',bairro:c.bairro||'',cep:c.cep||'',transp:c.transp||'',prazo:c.prazo||''}));
@@ -608,6 +625,62 @@ async function subirComprovante(comp){
   return SB.url+'/storage/v1/object/public/comprovantes/'+cam;
 }
 
+/* ---- convite por e-mail e troca de senha ---- */
+function tokenDaURL(){
+  const h=location.hash||'';
+  if(h.indexOf('access_token=')<0) return null;
+  const q={}; h.replace(/^#/,'').split('&').forEach(par=>{const[a,b]=par.split('=');q[a]=decodeURIComponent(b||'');});
+  return q.access_token?q:null;
+}
+function limparURL(){ history.replaceState(null,'',location.pathname+location.search); }
+async function salvarSenha(){
+  const a=document.getElementById('nsA').value, b=document.getElementById('nsB').value;
+  const m=document.getElementById('nsMsg');
+  if(a.length<6){ m.innerHTML='<span style="color:#dc2626">A senha precisa ter pelo menos 6 caracteres.</span>'; return; }
+  if(a!==b){ m.innerHTML='<span style="color:#dc2626">As duas senhas não são iguais.</span>'; return; }
+  const bt=document.querySelector('#novaSenha .lgbt'); if(bt){ bt.disabled=true; bt.textContent='Salvando...'; }
+  m.innerHTML='Salvando...';
+  try{
+    const r=await buscar(SB.url+'/auth/v1/user',{method:'PUT',
+      headers:{'Content-Type':'application/json','apikey':SB.key,'Authorization':'Bearer '+SB.tok},
+      body:JSON.stringify({password:a})},20);
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.msg||j.error_description||j.message||'não consegui salvar');
+    SB.email=(j.email)||SB.email; sbGravaSessao();
+    document.getElementById('novaSenha').classList.add('hidden');
+    await baixarTudo();
+    document.getElementById('login').classList.add('hidden');
+    toast('Senha criada — bem-vindo(a)!');
+    if(!DB.cfg.empresa) setTimeout(primeiroUso,600);
+  }catch(e){
+    m.innerHTML='<span style="color:#dc2626">'+esc(e.message)+'</span>';
+  }finally{ const b2=document.querySelector('#novaSenha .lgbt'); if(b2){ b2.disabled=false; b2.textContent='Salvar e entrar'; } }
+}
+async function esqueciSenha(){
+  const e=(document.getElementById('lgEmail').value||'').trim();
+  const m=document.getElementById('lgMsg');
+  if(!e){ m.innerHTML='<span style="color:#dc2626">Escreva seu e-mail no campo acima e clique de novo.</span>'; return; }
+  m.innerHTML='Enviando...';
+  try{
+    await buscar(SB.url+'/auth/v1/recover',{method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SB.key},body:JSON.stringify({email:e})},20);
+    m.innerHTML='Se esse e-mail tiver acesso, o link para criar uma senha nova chegou na caixa de entrada. Confira também o spam.';
+  }catch(x){ m.innerHTML='<span style="color:#dc2626">'+esc(x.message)+'</span>'; }
+}
+function primeiroUso(){
+  modal('Bem-vindo(a)!',`
+    <p style="font-size:13.5px;line-height:1.6;color:var(--muted);margin:0 0 16px">
+      O sistema está zerado, pronto para você começar. Para deixar com a sua cara,
+      escreva abaixo o nome da sua empresa — ele aparece no menu e nos extratos que você imprime.</p>
+    <div class="fld"><label>Nome da empresa</label><input type="text" id="puNome" placeholder="ex.: MINHA EMPRESA LTDA"></div>`,
+    [{txt:'Começar',cls:'btn',fn:()=>{
+      const n=document.getElementById('puNome').value.trim();
+      if(n){ DB.cfg.empresa=n; document.getElementById('logoNome').textContent=n; save(); }
+      fecharModal(); go('novo');
+      toast('Tudo pronto — lance o primeiro pedido');
+    }}]);
+}
+
 /* ---- tela de login ---- */
 function telaLogin(msg){
   const d=document.getElementById('login'); d.classList.remove('hidden');
@@ -628,7 +701,7 @@ async function fazerLogin(){
   if(!u||!k){ m.innerHTML='<span style="color:#f87171">Faltou o endereço do banco ou a chave.</span>'; mostrarCfg(); return; }
   if(!e||!s){ m.innerHTML='<span style="color:#f87171">Preencha e-mail e senha.</span>'; return; }
   SB.url=u; SB.key=k; sbGravaCfg();
-  const bt=document.querySelector('.lgbt'); if(bt){ bt.disabled=true; bt.textContent='Entrando...'; }
+  const bt=document.querySelector('#login .lgbt'); if(bt){ bt.disabled=true; bt.textContent='Entrando...'; }
   m.innerHTML='Verificando...';
   try{
     await entrar(e,s);
@@ -637,6 +710,7 @@ async function fazerLogin(){
     document.getElementById('login').classList.add('hidden');
     document.getElementById('lgSenha').value='';
     toast('Conectado ao banco');
+    if(!DB.cfg.empresa && !DB.clientes.length) setTimeout(primeiroUso,600);
   }catch(x){
     let t=x.message||'';
     if(/Invalid login/i.test(t)) t='E-mail ou senha incorretos.';
@@ -644,7 +718,7 @@ async function fazerLogin(){
     if(/Signups not allowed|signup_disabled/i.test(t)) t='Cadastro fechado. Peça ao administrador para criar seu acesso.';
     m.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>';
     SB.tok=null; sbGravaSessao();
-  }finally{ const b2=document.querySelector('.lgbt'); if(b2){ b2.disabled=false; b2.textContent='Entrar'; } }
+  }finally{ const b2=document.querySelector('#login .lgbt'); if(b2){ b2.disabled=false; b2.textContent='Entrar'; } }
 }
 function usarLocal(){
   document.getElementById('login').classList.add('hidden');
@@ -653,6 +727,17 @@ function usarLocal(){
 }
 async function iniciar(){
   sbCarregaCfg();
+  const conv=tokenDaURL();
+  if(conv && SB.url && SB.key){
+    SB.tok=conv.access_token; SB.ref=conv.refresh_token||null;
+    SB.exp=Date.now()+((+conv.expires_in||3600)-90)*1000; sbGravaSessao(); limparURL();
+    document.getElementById('login').classList.add('hidden');
+    const ns=document.getElementById('novaSenha'); ns.classList.remove('hidden');
+    if(conv.type==='recovery'){ document.getElementById('nsSub').textContent='Recuperação de senha';
+      document.getElementById('nsMsg').textContent='Escolha a sua nova senha.'; }
+    setTimeout(()=>document.getElementById('nsA').focus(),120);
+    return;
+  }
   if(!SB.url||!SB.key){ load(); renderAll(); telaLogin('Cole o endereço do banco e a chave.'); return; }
   if(SB.tok){
     try{ if(SB.exp && Date.now()>SB.exp) await renovar();
