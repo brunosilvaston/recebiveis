@@ -164,7 +164,7 @@
       <div class="fld"><label>Chave pública</label><input type="text" id="lgKey" placeholder="eyJ... ou sb_publishable_..." autocomplete="off"></div>
       <div class="lgsep"></div>
     </div>
-    <div class="fld"><label>E-mail</label><input type="email" id="lgEmail" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('lgSenha').focus()"></div>
+    <div class="fld"><label>Usuário</label><input type="text" id="lgEmail" autocomplete="username" placeholder="seu usuário ou e-mail" onkeydown="if(event.key==='Enter')document.getElementById('lgSenha').focus()"></div>
     <div class="fld"><label>Senha</label><input type="password" id="lgSenha" autocomplete="current-password" onkeydown="if(event.key==='Enter')fazerLogin()"></div>
     <button class="btn lgbt" onclick="fazerLogin()">Entrar</button>
     <div class="lgpe">
@@ -193,6 +193,7 @@
     <a onclick="document.getElementById('impFile').click()">↑ Restaurar backup</a>
     <a onclick="carregarExemplo()">◈ Carregar dados de exemplo</a>
     <a onclick="zerarTudo()">✕ Apagar tudo</a>
+    <a id="btSenha" class="hidden" onclick="trocarSenha()">🔒 Trocar minha senha</a>
     <a id="btSair" class="hidden" onclick="sair()">⏻ Sair</a>
     <input type="file" id="impFile" accept=".json" class="hidden">
   </div>
@@ -394,7 +395,7 @@ function abrirConfig(){
     <div class="lgsep"></div>
     <div class="fld"><label>Endereço do banco</label><input type="text" id="cfUrl" value="${esc(SB.url)}" placeholder="https://xxxxx.supabase.co"></div>
     <div class="fld"><label>Chave pública</label><input type="text" id="cfKey" value="${esc(SB.key)}"></div>
-    <div class="mini" style="margin-top:10px">${SB.tok?('Conectado como <b>'+esc(SB.email)+'</b>. As alterações são gravadas no banco automaticamente.'):'Sem conexão com o banco — os dados estão apenas neste navegador.'}</div>`,
+    <div class="mini" style="margin-top:10px">${SB.tok?('Conectado como <b>'+esc(paraNome(SB.email))+'</b>. As alterações são gravadas no banco automaticamente.'):'Sem conexão com o banco — os dados estão apenas neste navegador.'}</div>`,
     [{txt:'Salvar',cls:'btn',fn:()=>{
       DB.cfg.empresa=document.getElementById('cfEmp').value.trim();
       const u=document.getElementById('cfUrl').value.trim().replace(/\/+$/,''), k=document.getElementById('cfKey').value.trim();
@@ -408,6 +409,9 @@ function abrirConfig(){
 }
 
 /* ============ SUPABASE (banco na nuvem + login) ============ */
+const DOMINIO='@recebiveis.sistema';
+function paraEmail(v){ v=String(v||'').trim(); if(!v) return ''; return v.indexOf('@')>=0?v.toLowerCase():v.toLowerCase().replace(/[^a-z0-9._-]/g,'')+DOMINIO; }
+function paraNome(v){ v=String(v||''); return v.endsWith(DOMINIO)?v.slice(0,-DOMINIO.length):v; }
 const SB={url:'https://uoexrxgtaejwyftnxvhc.supabase.co',key:'sb_publishable_Fx5jb0a1jQE6a8Ny1Q6Vxg_756uKwjf',tok:null,ref:null,exp:0,email:'',pronto:false,carregando:false};
 let SYNC=null, ESPELHO={c:{},p:{}};
 
@@ -427,9 +431,11 @@ function sbGravaCfg(){
 function pintaNuvem(){
   const el=document.getElementById('nuvemSt'); if(!el) return;
   const bt=document.getElementById('btSair');
+  const bs=document.getElementById('btSenha');
+  if(bs) bs.classList.toggle('hidden',!SB.tok);
   if(!SB.url||!SB.key){ el.innerHTML='☁ Banco não configurado'; el.style.color='#475569'; if(bt) bt.classList.add('hidden'); return; }
   if(!SB.tok){ el.innerHTML='☁ Desconectado'; el.style.color='#f59e0b'; if(bt) bt.classList.add('hidden'); return; }
-  el.innerHTML='☁ No banco ✓<br><span style="color:#334155">'+esc(SB.email)+'</span>';
+  el.innerHTML='☁ No banco ✓<br><span style="color:#334155">'+esc(paraNome(SB.email))+'</span>';
   el.style.color='#38bdf8'; if(bt) bt.classList.remove('hidden');
 }
 
@@ -568,7 +574,7 @@ async function subirMudancas(){
     apagaP.forEach(id=>delete ESPELHO.p[id]); apagaC.forEach(id=>delete ESPELHO.c[id]);
     PENDENTE=false;
     VERSAO=await lerVersao()||VERSAO;
-    if(el){ el.innerHTML='☁ gravado '+new Date().toLocaleTimeString('pt-BR').slice(0,5)+'<br><span style="color:#334155">'+esc(SB.email)+'</span>'; }
+    if(el){ el.innerHTML='☁ gravado '+new Date().toLocaleTimeString('pt-BR').slice(0,5)+'<br><span style="color:#334155">'+esc(paraNome(SB.email))+'</span>'; }
   }catch(e){
     if(el){ el.innerHTML='☁ <span style="color:#f87171">falhou — tentando de novo</span>'; }
     clearTimeout(SYNC); SYNC=setTimeout(subirMudancas,8000);
@@ -647,6 +653,7 @@ async function salvarSenha(){
     const j=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(j.msg||j.error_description||j.message||'não consegui salvar');
     SB.email=(j.email)||SB.email; sbGravaSessao();
+    try{ localStorage.setItem('sb_senha_ok','1'); }catch(x){}
     document.getElementById('novaSenha').classList.add('hidden');
     await baixarTudo();
     document.getElementById('login').classList.add('hidden');
@@ -657,9 +664,10 @@ async function salvarSenha(){
   }finally{ const b2=document.querySelector('#novaSenha .lgbt'); if(b2){ b2.disabled=false; b2.textContent='Salvar e entrar'; } }
 }
 async function esqueciSenha(){
-  const e=(document.getElementById('lgEmail').value||'').trim();
+  const e=paraEmail(document.getElementById('lgEmail').value);
   const m=document.getElementById('lgMsg');
-  if(!e){ m.innerHTML='<span style="color:#dc2626">Escreva seu e-mail no campo acima e clique de novo.</span>'; return; }
+  if(!e){ m.innerHTML='<span style="color:#dc2626">Escreva seu usuário no campo acima e clique de novo.</span>'; return; }
+  if(e.endsWith(DOMINIO)){ m.innerHTML='<span style="color:#dc2626">Seu acesso é por usuário, sem e-mail. Peça uma senha nova para quem administra o sistema.</span>'; return; }
   m.innerHTML='Enviando...';
   try{
     await buscar(SB.url+'/auth/v1/recover',{method:'POST',
@@ -681,6 +689,64 @@ function primeiroUso(){
     }}]);
 }
 
+function trocarSenha(){
+  if(!SB.tok) return alert('Entre no sistema primeiro.');
+  modal('Trocar minha senha',`
+    <p style="font-size:13px;line-height:1.55;color:var(--muted);margin:0 0 14px">
+      Escolha uma senha nova. Depois de salvar, só você vai saber qual é —
+      nem quem criou o seu acesso consegue ver.</p>
+    <div class="fld"><label>Nova senha</label><input type="password" id="tsA" placeholder="mínimo 6 caracteres" autocomplete="new-password"></div>
+    <div class="fld"><label>Repita a senha</label><input type="password" id="tsB" autocomplete="new-password"></div>
+    <div id="tsMsg" class="mini" style="min-height:16px;margin-top:8px"></div>`,
+    [{txt:'Salvar senha',cls:'btn',fn:async()=>{
+      const a=document.getElementById('tsA').value, b=document.getElementById('tsB').value;
+      const m=document.getElementById('tsMsg');
+      if(a.length<6){ m.innerHTML='<span style="color:var(--bad)">A senha precisa ter pelo menos 6 caracteres.</span>'; return; }
+      if(a!==b){ m.innerHTML='<span style="color:var(--bad)">As duas senhas não são iguais.</span>'; return; }
+      m.textContent='Salvando...';
+      try{
+        if(SB.exp && Date.now()>SB.exp) await renovar();
+        const r=await buscar(SB.url+'/auth/v1/user',{method:'PUT',
+          headers:{'Content-Type':'application/json','apikey':SB.key,'Authorization':'Bearer '+SB.tok},
+          body:JSON.stringify({password:a,data:{senha_trocada:true}})},20);
+        const j=await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(j.msg||j.error_description||j.message||'não consegui salvar');
+        PROVISORIA=false; try{ localStorage.setItem('sb_senha_ok','1'); }catch(e){}
+        fecharModal(); toast('Senha alterada — guarde bem');
+      }catch(e){ m.innerHTML='<span style="color:var(--bad)">'+esc(e.message)+'</span>'; }
+    }}]);
+}
+let PROVISORIA=false;
+function avisarSenha(){
+  try{ if(localStorage.getItem('sb_senha_ok')) return; }catch(e){}
+  PROVISORIA=true;
+  modal('Crie a sua senha',`
+    <p style="font-size:13.5px;line-height:1.6;margin:0 0 8px">
+      Você entrou com uma <b>senha provisória</b>, que outra pessoa criou para você.</p>
+    <p style="font-size:13.5px;line-height:1.6;color:var(--muted);margin:0 0 16px">
+      Troque agora por uma senha só sua. Leva 10 segundos e ninguém mais fica sabendo qual é.</p>
+    <div class="fld"><label>Nova senha</label><input type="password" id="tsA" placeholder="mínimo 6 caracteres" autocomplete="new-password"></div>
+    <div class="fld"><label>Repita a senha</label><input type="password" id="tsB" autocomplete="new-password"></div>
+    <div id="tsMsg" class="mini" style="min-height:16px;margin-top:8px"></div>`,
+    [{txt:'Agora não',cls:'btn ghost',fn:()=>{ fecharModal(); toast('Você pode trocar depois em 🔒 Trocar minha senha'); }},
+     {txt:'Salvar senha',cls:'btn',fn:async()=>{
+      const a=document.getElementById('tsA').value, b=document.getElementById('tsB').value;
+      const m=document.getElementById('tsMsg');
+      if(a.length<6){ m.innerHTML='<span style="color:var(--bad)">A senha precisa ter pelo menos 6 caracteres.</span>'; return; }
+      if(a!==b){ m.innerHTML='<span style="color:var(--bad)">As duas senhas não são iguais.</span>'; return; }
+      m.textContent='Salvando...';
+      try{
+        const r=await buscar(SB.url+'/auth/v1/user',{method:'PUT',
+          headers:{'Content-Type':'application/json','apikey':SB.key,'Authorization':'Bearer '+SB.tok},
+          body:JSON.stringify({password:a,data:{senha_trocada:true}})},20);
+        if(!r.ok){ const j=await r.json().catch(()=>({})); throw new Error(j.msg||j.message||'não consegui salvar'); }
+        PROVISORIA=false; try{ localStorage.setItem('sb_senha_ok','1'); }catch(e){}
+        fecharModal(); toast('Senha criada — agora só você sabe');
+        if(!DB.cfg.empresa && !DB.clientes.length) setTimeout(primeiroUso,500);
+      }catch(e){ m.innerHTML='<span style="color:var(--bad)">'+esc(e.message)+'</span>'; }
+    }}]);
+}
+
 /* ---- tela de login ---- */
 function telaLogin(msg){
   const d=document.getElementById('login'); d.classList.remove('hidden');
@@ -695,11 +761,11 @@ function mostrarCfg(){ document.getElementById('lgCfg').style.display='block'; }
 async function fazerLogin(){
   const u=document.getElementById('lgUrl').value.trim().replace(/\/+$/,'');
   const k=document.getElementById('lgKey').value.trim();
-  const e=document.getElementById('lgEmail').value.trim();
+  const e=paraEmail(document.getElementById('lgEmail').value);
   const s=document.getElementById('lgSenha').value;
   const m=document.getElementById('lgMsg');
   if(!u||!k){ m.innerHTML='<span style="color:#f87171">Faltou o endereço do banco ou a chave.</span>'; mostrarCfg(); return; }
-  if(!e||!s){ m.innerHTML='<span style="color:#f87171">Preencha e-mail e senha.</span>'; return; }
+  if(!e||!s){ m.innerHTML='<span style="color:#dc2626">Preencha usuário e senha.</span>'; return; }
   SB.url=u; SB.key=k; sbGravaCfg();
   const bt=document.querySelector('#login .lgbt'); if(bt){ bt.disabled=true; bt.textContent='Entrando...'; }
   m.innerHTML='Verificando...';
@@ -710,10 +776,12 @@ async function fazerLogin(){
     document.getElementById('login').classList.add('hidden');
     document.getElementById('lgSenha').value='';
     toast('Conectado ao banco');
-    if(!DB.cfg.empresa && !DB.clientes.length) setTimeout(primeiroUso,600);
+    let trocou=false; try{ trocou=!!localStorage.getItem('sb_senha_ok'); }catch(x){}
+    if(!trocou) setTimeout(avisarSenha,600);
+    else if(!DB.cfg.empresa && !DB.clientes.length) setTimeout(primeiroUso,600);
   }catch(x){
     let t=x.message||'';
-    if(/Invalid login/i.test(t)) t='E-mail ou senha incorretos.';
+    if(/Invalid login/i.test(t)) t='Usuário ou senha incorretos.';
     if(/Failed to fetch/i.test(t)) t='Não consegui falar com o banco. Confira sua internet.';
     if(/Signups not allowed|signup_disabled/i.test(t)) t='Cadastro fechado. Peça ao administrador para criar seu acesso.';
     m.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>';
