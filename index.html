@@ -33,6 +33,14 @@
   .btn.dang{background:var(--bad)}
   .btn.okk{background:var(--ok)}
   .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+  .kpis.p5{grid-template-columns:repeat(5,1fr)}
+  .perbar{margin-bottom:16px}
+  .atalhos{display:flex;gap:6px;flex-wrap:wrap}
+  .atalhos a{font-size:12px;font-weight:600;padding:7px 12px;border:1px solid var(--line);border-radius:20px;cursor:pointer;color:var(--muted);background:#fff;white-space:nowrap}
+  .atalhos a:hover{border-color:#93b4fd;color:var(--ink)}
+  .atalhos a.on{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+  .kpi.per{border-color:#c7d7fe;background:linear-gradient(180deg,#f8faff,#fff)}
+  @media(max-width:1400px){.kpis.p5{grid-template-columns:repeat(3,1fr)}}
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 17px}
   .kpi .lab{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
   .kpi .val{font-size:23px;font-weight:700;margin-top:7px;letter-spacing:-.5px}
@@ -207,19 +215,39 @@
     <div><h1>Visão Geral</h1><div class="sub" id="visaoSub">—</div></div>
     <div><button class="btn ghost" onclick="go('receber')">Ver parcelas</button> <button class="btn" onclick="go('novo')">+ Lançar pedido</button></div>
   </header>
+  <div class="panel perbar">
+    <div class="pad" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fld" style="margin:0"><label>Período</label>
+        <div class="atalhos">
+          <a id="pa-tudo" onclick="periodo('tudo')">Tudo</a>
+          <a id="pa-mes" onclick="periodo('mes')">Este mês</a>
+          <a id="pa-ant" onclick="periodo('ant')">Mês passado</a>
+          <a id="pa-90" onclick="periodo('90')">Últimos 90 dias</a>
+          <a id="pa-ano" onclick="periodo('ano')">Este ano</a>
+        </div>
+      </div>
+      <div class="fld" style="margin:0"><label>De</label><input type="date" id="vDe" onchange="periodo('livre')"></div>
+      <div class="fld" style="margin:0"><label>Até</label><input type="date" id="vAte" onchange="periodo('livre')"></div>
+      <div id="perInfo" class="mini" style="flex:1;min-width:180px;text-align:right"></div>
+    </div>
+  </div>
   <div class="kpis" id="kpis"></div>
   <div class="grid2">
     <div>
       <div class="panel">
-        <h2>Recebimentos <small>últimos 3 meses realizados · próximos 4 previstos</small></h2>
+        <h2>Recebimentos <small id="chartSub">últimos 3 meses realizados · próximos 4 previstos</small></h2>
         <div class="pad">
           <div class="legend"><span><i style="background:#1d4ed8"></i>Recebido</span><span><i style="background:#c7d7fe"></i>Previsto</span></div>
           <div class="chart" id="chart"></div>
         </div>
       </div>
       <div class="panel">
-        <h2>Atenção <small>vencidas e a vencer nos próximos 15 dias</small></h2>
+        <h2>Atenção <small id="atencaoSub">vencidas e a vencer nos próximos 15 dias</small></h2>
         <div id="tblAtencao"></div>
+      </div>
+      <div class="panel">
+        <h2>Entradas de caixa <small id="caixaSub">todos os pagamentos registrados</small></h2>
+        <div id="tblCaixa"></div>
       </div>
     </div>
     <div class="panel">
@@ -872,29 +900,95 @@ function go(t){
 document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>go(a.dataset.tab));
 
 /* ================= VISÃO GERAL ================= */
+let PER={modo:'tudo',de:'',ate:''};
+function periodo(m){
+  const hj=hoje(), d=new Date(hj+'T12:00:00');
+  if(m==='tudo'){ PER={modo:'tudo',de:'',ate:''}; }
+  if(m==='mes'){ const a=hj.slice(0,7); PER={modo:m,de:a+'-01',ate:fimMes(a)}; }
+  if(m==='ant'){ const x=new Date(d.getFullYear(),d.getMonth()-1,1); const a=x.toISOString().slice(0,7); PER={modo:m,de:a+'-01',ate:fimMes(a)}; }
+  if(m==='90'){ PER={modo:m,de:addDias(hj,-90),ate:hj}; }
+  if(m==='ano'){ PER={modo:m,de:hj.slice(0,4)+'-01-01',ate:hj.slice(0,4)+'-12-31'}; }
+  if(m==='livre'){ PER={modo:'livre',de:document.getElementById('vDe').value,ate:document.getElementById('vAte').value};
+    if(!PER.de&&!PER.ate) PER.modo='tudo'; }
+  if(m!=='livre'){ document.getElementById('vDe').value=PER.de; document.getElementById('vAte').value=PER.ate; }
+  ['tudo','mes','ant','90','ano'].forEach(k=>{ const el=document.getElementById('pa-'+k); if(el) el.classList.toggle('on',PER.modo===k); });
+  renderVisao();
+}
+function fimMes(aaaamm){ const a=+aaaamm.slice(0,4), m=+aaaamm.slice(5,7);
+  return new Date(a,m,0).toISOString().slice(0,10); }
+function noPer(iso){
+  if(PER.modo==='tudo'||!iso) return PER.modo==='tudo';
+  if(PER.de && iso<PER.de) return false;
+  if(PER.ate && iso>PER.ate) return false;
+  return true;
+}
+function rotuloPer(){
+  if(PER.modo==='tudo') return 'todo o período';
+  if(PER.de&&PER.ate) return dbr(PER.de)+' a '+dbr(PER.ate);
+  if(PER.de) return 'de '+dbr(PER.de);
+  return 'até '+dbr(PER.ate);
+}
+function mesesDoPer(){
+  const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  let ini,fim;
+  if(PER.modo==='tudo'){
+    const base=new Date(hoje()+'T12:00:00');
+    ini=new Date(base.getFullYear(),base.getMonth()-3,1);
+    fim=new Date(base.getFullYear(),base.getMonth()+3,1);
+  }else{
+    const a=(PER.de||PER.ate), b=(PER.ate||PER.de);
+    ini=new Date(+a.slice(0,4),+a.slice(5,7)-1,1);
+    fim=new Date(+b.slice(0,4),+b.slice(5,7)-1,1);
+  }
+  const out=[]; const cur=new Date(ini);
+  while(cur<=fim && out.length<24){ out.push(cur.toISOString().slice(0,7)); cur.setMonth(cur.getMonth()+1); }
+  return {meses:out,NM};
+}
 function renderVisao(){
   const ps=todasParcelas();
   const abertas=ps.filter(p=>saldoDe(p)>0);
   const total=abertas.reduce((s,p)=>s+saldoDe(p),0);
   const venc=abertas.filter(p=>statusDe(p)==='vencido');
   const vTot=venc.reduce((s,p)=>s+saldoDe(p),0);
+  const filtrando=PER.modo!=='tudo';
+
+  /* ---- números do período ---- */
+  const pPer=abertas.filter(p=>noPer(p.venc));
+  const aReceberPer=pPer.reduce((s,p)=>s+saldoDe(p),0);
+  let recPer=0, nRec=0;
+  ps.forEach(p=>(p.pagos||[]).forEach(x=>{ if(noPer(x.data)){ recPer+=x.valor; nRec++; } }));
+  const pedPer=DB.pedidos.filter(p=>noPer(p.data));
+  const vendPer=pedPer.reduce((s,p)=>s+p.total,0);
+
+  /* ---- sem filtro: mantém a leitura de sempre ---- */
   const prox=abertas.filter(p=>{const d=diasEntre(hoje(),p.venc);return d>=0&&d<=30;});
   const pTot=prox.reduce((s,p)=>s+saldoDe(p),0);
   const mes=hoje().slice(0,7);
   let recMes=0; ps.forEach(p=>(p.pagos||[]).forEach(x=>{ if((x.data||'').slice(0,7)===mes) recMes+=x.valor; }));
 
-  document.getElementById('kpis').innerHTML=`
+  const box=document.getElementById('kpis');
+  box.classList.toggle('p5',filtrando);
+  box.innerHTML = filtrando ? `
+    <div class="kpi"><div class="lab">Total a Receber</div><div class="val">${c2r(total)}</div><div class="hint">posição de hoje · ${abertas.length} parcela(s)</div></div>
+    <div class="kpi bad"><div class="lab">Vencido</div><div class="val">${c2r(vTot)}</div><div class="hint">posição de hoje · ${venc.length} parcela(s)</div></div>
+    <div class="kpi per"><div class="lab">Vence no período</div><div class="val">${c2r(aReceberPer)}</div><div class="hint">${pPer.length} parcela(s) em aberto</div></div>
+    <div class="kpi ok per"><div class="lab">Recebido no período</div><div class="val">${c2r(recPer)}</div><div class="hint">${nRec} pagamento(s)</div></div>
+    <div class="kpi per"><div class="lab">Vendido no período</div><div class="val">${c2r(vendPer)}</div><div class="hint">${pedPer.length} pedido(s) lançado(s)</div></div>` : `
     <div class="kpi"><div class="lab">Total a Receber</div><div class="val">${c2r(total)}</div><div class="hint">${abertas.length} parcela(s) em aberto</div></div>
     <div class="kpi bad"><div class="lab">Vencido</div><div class="val">${c2r(vTot)}</div><div class="hint">${venc.length} parcela(s) · ${new Set(venc.map(p=>p.pedido.clienteId)).size} cliente(s)</div></div>
     <div class="kpi warn"><div class="lab">Vence em 30 dias</div><div class="val">${c2r(pTot)}</div><div class="hint">${prox.length} parcela(s)</div></div>
     <div class="kpi ok"><div class="lab">Recebido no mês</div><div class="val">${c2r(recMes)}</div><div class="hint">referência ${dbr(hoje())}</div></div>`;
 
-  document.getElementById('visaoSub').textContent =
-    DB.clientes.length+' cliente(s) · '+DB.pedidos.length+' pedido(s) · posição em '+dbr(hoje());
+  document.getElementById('perInfo').innerHTML = filtrando
+    ? 'Mostrando <b>'+rotuloPer()+'</b><br><a class="lnk" onclick="periodo(\'tudo\')">limpar filtro</a>'
+    : 'Sem filtro — mostrando tudo';
 
-  // gráfico
-  const meses=[]; const base=new Date(hoje()+'T12:00:00');
-  for(let i=-3;i<=3;i++){ const d=new Date(base.getFullYear(),base.getMonth()+i,1); meses.push(d.toISOString().slice(0,7)); }
+  document.getElementById('visaoSub').textContent =
+    DB.clientes.length+' cliente(s) · '+DB.pedidos.length+' pedido(s) · '+
+    (filtrando?('período: '+rotuloPer()):('posição em '+dbr(hoje())));
+
+  /* ---- gráfico ---- */
+  const {meses,NM}=mesesDoPer();
   const dados=meses.map(m=>{
     let rec=0,prev=0;
     ps.forEach(p=>{
@@ -904,23 +998,50 @@ function renderVisao(){
     return {m,rec,prev};
   });
   const max=Math.max(1,...dados.map(d=>Math.max(d.rec,d.prev)));
-  const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
   document.getElementById('chart').innerHTML = dados.map(d=>{
     const v = d.rec>0?d.rec:d.prev; const isRec = d.rec>0;
     const h = Math.max(2,Math.round(v/max*100));
-    return `<div class="col"><div class="vl">${v?c2n(v).replace(',00',''):''}</div><div class="stk ${isRec?'rec':''}" style="height:${h}%"></div><div class="lb">${NM[+d.m.slice(5,7)-1]}</div></div>`;
+    const rot = NM[+d.m.slice(5,7)-1] + (meses.length>7?('/'+d.m.slice(2,4)):'');
+    return `<div class="col"><div class="vl">${v?c2n(v).replace(',00',''):''}</div><div class="stk ${isRec?'rec':''}" style="height:${h}%"></div><div class="lb">${rot}</div></div>`;
   }).join('');
+  const ch=document.getElementById('chartSub');
+  if(ch) ch.textContent = filtrando ? rotuloPer() : 'últimos 3 meses realizados · próximos 4 previstos';
 
-  // atenção
-  const at=abertas.filter(p=>diasEntre(hoje(),p.venc)<=15).sort((a,b)=>a.venc<b.venc?-1:1);
+  /* ---- tabela de vencimentos ---- */
+  const at = filtrando
+    ? pPer.slice().sort((a,b)=>a.venc<b.venc?-1:1)
+    : abertas.filter(p=>diasEntre(hoje(),p.venc)<=15).sort((a,b)=>a.venc<b.venc?-1:1);
+  const somaAt=at.reduce((s,p)=>s+saldoDe(p),0);
+  const ta=document.getElementById('atencaoSub');
+  if(ta) ta.textContent = filtrando ? ('com vencimento em '+rotuloPer()) : 'vencidas e a vencer nos próximos 15 dias';
   document.getElementById('tblAtencao').innerHTML = at.length? `<table><thead><tr>
       <th>Cliente</th><th>Pedido</th><th>Parc.</th><th>Vencimento</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>`+
     at.map(p=>`<tr><td><b>${esc(cliDe(p.pedido.clienteId).nome)}</b></td><td>#${esc(p.pedido.num)}</td><td>${p.rot}</td>
       <td>${dbr(p.venc)}</td><td class="num">${c2r(saldoDe(p))}</td><td>${tagDe(p)}</td>
       <td><button class="btn sm" onclick="abrirBaixa('${p.pedido.id}',${p.idx})">Dar baixa</button></td></tr>`).join('')
-    +'</tbody></table>' : '<div class="empty">Nada vencendo nos próximos 15 dias 👍</div>';
+    +`</tbody></table><div class="tot"><span>${at.length} parcela(s)</span><span>${c2r(somaAt)}</span></div>`
+    : `<div class="empty">${filtrando?'Nenhuma parcela vencendo nesse período.':'Nada vencendo nos próximos 15 dias 👍'}</div>`;
 
-  // saldos
+  /* ---- recebimentos do período ---- */
+  const cx=document.getElementById('tblCaixa');
+  if(cx){
+    const rs=[];
+    DB.pedidos.forEach(p=>(p.parcelas||[]).forEach((x,i)=>(x.pagos||[]).forEach((g,k)=>{
+      if(noPer(g.data)) rs.push({p,i,k,g}); })));
+    rs.sort((a,b)=>a.g.data<b.g.data?1:-1);
+    const cs2=document.getElementById('caixaSub');
+    if(cs2) cs2.textContent = filtrando ? rotuloPer() : 'todos os pagamentos registrados';
+    cx.innerHTML = rs.length? `<table><thead><tr><th>Data</th><th>Cliente</th><th>Pedido</th><th>Forma</th><th class="num">Valor</th></tr></thead><tbody>`+
+      rs.slice(0,40).map(r=>`<tr><td><b>${dbr(r.g.data)}</b></td>
+        <td>${esc(cliDe(r.p.clienteId).fantasia||cliDe(r.p.clienteId).nome)}</td>
+        <td><a class="lnk" onclick="verPedido('${r.p.id}')">#${esc(r.p.num)}</a></td>
+        <td>${esc(r.g.forma||'—')}</td>
+        <td class="num" style="font-weight:700;color:var(--ok)">${c2r(r.g.valor)}</td></tr>`).join('')
+      +`</tbody></table><div class="tot"><span>${rs.length} pagamento(s)${rs.length>40?' (mostrando 40)':''}</span><span>${c2r(rs.reduce((s,r)=>s+r.g.valor,0))}</span></div>`
+      : '<div class="empty">Nenhum pagamento nesse período.</div>';
+  }
+
+  /* ---- saldos por cliente ---- */
   const cs=DB.clientes.map(c=>({c,s:saldoCliente(c.id),t:totalCliente(c.id)})).filter(x=>x.t>0).sort((a,b)=>b.s-a.s);
   document.getElementById('tblSaldos').innerHTML = cs.length? `<table><thead><tr><th>Cliente</th><th class="num">Saldo</th><th>Pago</th></tr></thead><tbody>`+
     cs.map(x=>{
@@ -933,8 +1054,6 @@ function renderVisao(){
     }).join('')+`</tbody></table><div class="tot"><span>TOTAL A RECEBER</span><span>${c2r(total)}</span></div>`
     : '<div class="empty">Nenhum cliente com pedido ainda.</div>';
 }
-
-/* ================= A RECEBER ================= */
 function limparFiltros(){ ['fCli','fSt','fDe','fAte','fBusca'].forEach(i=>document.getElementById(i).value=''); renderReceber(); }
 function filtradas(){
   const cli=document.getElementById('fCli').value, s=document.getElementById('fSt').value;
@@ -1687,6 +1806,7 @@ function renderAll(){ renderVisao(); renderReceber(); renderClientes(); renderPe
 load();
 document.getElementById('dData').value=hoje();
 calcParcelas();
+periodo('tudo');
 iniciar();
 </script>
 </body>
