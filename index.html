@@ -166,8 +166,6 @@
 <div id="login" class="hidden">
   <div class="lgbox">
     <div class="lglogo"><b>CONTROLE DE RECEBÍVEIS</b><span>Pedidos, parcelas e saldos</span></div>
-    <div class="fld"><label>Empresa</label>
-      <div class="atalhos" id="lgEmp"></div></div>
     <div id="lgMsg" class="lgmsg"></div>
     <div id="lgCfg">
       <div class="fld"><label>Endereço do banco</label><input type="text" id="lgUrl" placeholder="https://xxxxx.supabase.co" autocomplete="off"></div>
@@ -203,7 +201,6 @@
     <a onclick="document.getElementById('impFile').click()">↑ Restaurar backup</a>
     <a onclick="carregarExemplo()">◈ Carregar dados de exemplo</a>
     <a onclick="zerarTudo()">✕ Apagar tudo</a>
-    <a id="btEmp" onclick="menuEmpresa()">⇄ Trocar de empresa</a>
     <a id="btSenha" class="hidden" onclick="trocarSenha()">🔒 Trocar minha senha</a>
     <a id="btSair" class="hidden" onclick="sair()">⏻ Sair</a>
     <input type="file" id="impFile" accept=".json" class="hidden">
@@ -487,6 +484,17 @@ const EMPRESAS=[
 ];
 function empresaDe(id){ return EMPRESAS.find(e=>e.id===id)||EMPRESAS[0]; }
 function empresaAtual(){
+  /* 1) a última usada, se ainda tiver sessão guardada */
+  try{ const s=localStorage.getItem('sb_empresa');
+    if(s&&empresaDe(s).id===s){
+      const ss=JSON.parse(localStorage.getItem('sb_sessao_'+s)||'{}');
+      if(ss.tok) return s;
+    } }catch(e){}
+  /* 2) qualquer empresa com sessão aberta */
+  for(const e of EMPRESAS){
+    try{ const ss=JSON.parse(localStorage.getItem('sb_sessao_'+e.id)||'{}'); if(ss.tok) return e.id; }catch(x){}
+  }
+  /* 3) nada aberto: fica na primeira só para ter um banco de partida */
   try{ const s=localStorage.getItem('sb_empresa'); if(s&&empresaDe(s).id===s) return s; }catch(e){}
   return EMPRESAS[0].id;
 }
@@ -494,6 +502,15 @@ function usarEmpresa(id,recarregar){
   const e=empresaDe(id);
   try{ localStorage.setItem('sb_empresa',e.id); }catch(x){}
   SB.emp=e.id; SB.url=e.url; SB.key=e.key;
+  /* zera a sessão em memória antes de trocar: sem isso o token/refresh de uma
+     empresa acabava gravado no espaço da outra. */
+  SB.tok=null; SB.ref=null; SB.exp=0; SB.email=''; SB.pronto=false;
+  try{ const c=JSON.parse(localStorage.getItem('sb_cfg_'+e.id)||'{}');
+    if(c.url) SB.url=String(c.url).replace(/\/+$/,'');
+    if(c.key) SB.key=c.key; }catch(x){}
+  try{ const s=JSON.parse(localStorage.getItem('sb_sessao_'+e.id)||'{}');
+    SB.tok=s.tok||null; SB.ref=s.ref||null; SB.exp=s.exp||0; SB.email=s.email||''; }catch(x){}
+  if(typeof ajustaKEY==='function') ajustaKEY();
   if(recarregar) location.reload();
 }
 function paraEmail(v){ v=String(v||'').trim(); if(!v) return ''; return v.indexOf('@')>=0?v.toLowerCase():v.toLowerCase().replace(/[^a-z0-9._-]/g,'')+DOMINIO; }
@@ -557,7 +574,9 @@ async function renovar(){
 }
 function sair(){
   if(!confirm('Sair do sistema? Os dados continuam no banco.')) return;
-  SB.tok=null; SB.ref=null; SB.exp=0; sbGravaSessao(); location.reload();
+  SB.tok=null; SB.ref=null; SB.exp=0; SB.email=''; sbGravaSessao();
+  try{ localStorage.removeItem('sb_empresa'); }catch(e){}
+  location.reload();
 }
 
 /* ---- chamadas de dados ---- */
@@ -593,7 +612,9 @@ async function baixarTudo(){
     rest('GET','config?select=*')
   ]);
   const emp=(cf||[]).find(x=>x.chave==='empresa');
-  const nb={cfg:{empresa:emp?emp.valor:(DB.cfg.empresa||'')},clientes:[],pedidos:[]};
+  /* o nome da empresa vem SÓ da config deste banco. Herdar do estado anterior fazia
+     o nome de uma empresa aparecer na outra ao trocar de login. */
+  const nb={cfg:{empresa:emp?String(emp.valor||''):''},clientes:[],pedidos:[]};
   (cl||[]).forEach(c=>nb.clientes.push({id:c.id,nome:c.nome,fantasia:c.fantasia||'',doc:c.doc||'',cidade:c.cidade||'',
     fone:c.fone||'',limite:+c.limite||0,obs:c.obs||'',email:c.email||'',ie:c.ie||'',contato:c.contato||'',
     endereco:c.endereco||'',bairro:c.bairro||'',cep:c.cep||'',transp:c.transp||'',prazo:c.prazo||''}));
@@ -612,6 +633,7 @@ async function baixarTudo(){
   DB.clientes.forEach(c=>ESPELHO.c[c.id]=JSON.stringify(c));
   DB.pedidos.forEach(p=>ESPELHO.p[p.id]=JSON.stringify(p));
   document.getElementById('logoNome').textContent=DB.cfg.empresa||'CONTROLE DE RECEBÍVEIS';
+  document.title=(DB.cfg.empresa||'Controle de Recebíveis');
   _save(); SB.pronto=true; SB.carregando=false; PENDENTE=false; renderAll(); pintaNuvem();
   const vs=(cf||[]).find(x=>x.chave==='versao'); VERSAO=vs?vs.valor:VERSAO;
   ligarVigia();
@@ -717,18 +739,6 @@ async function subirComprovante(comp){
     headers:{'apikey':SB.key,'Authorization':'Bearer '+SB.tok,'Content-Type':tipo,'x-upsert':'true'},body:buf});
   if(!r.ok) throw new Error(await r.text());
   return SB.url+'/storage/v1/object/public/comprovantes/'+cam;
-}
-
-function menuEmpresa(){
-  modal('Trocar de empresa',`
-    <p style="font-size:13.5px;line-height:1.6;color:var(--muted);margin:0 0 14px">
-      Cada empresa tem o seu próprio banco de dados, separado. Trocar aqui recarrega o sistema
-      e pede o login daquela empresa.</p>
-    ${EMPRESAS.map(e=>`<div style="margin-bottom:8px">
-      <button class="btn ${e.id===SB.emp?'':'ghost'}" style="width:100%;justify-content:space-between"
-        onclick="${e.id===SB.emp?'fecharModal()':`trocarEmpresa('${e.id}')`}">
-        <span>${esc(e.rot)}</span><span style="font-size:11px;opacity:.75">${e.id===SB.emp?'em uso agora':(e.url?'entrar':'configurar')}</span>
-      </button></div>`).join('')}`,[]);
 }
 
 /* ---- convite por e-mail e troca de senha ---- */
@@ -842,20 +852,14 @@ function avisarSenha(){
         if(!r.ok){ const j=await r.json().catch(()=>({})); throw new Error(j.msg||j.message||'não consegui salvar'); }
         PROVISORIA=false; try{ localStorage.setItem('sb_senha_ok_'+SB.emp,'1'); }catch(e){}
         fecharModal(); toast('Senha criada — agora só você sabe');
-        if(!DB.cfg.empresa && !DB.clientes.length) setTimeout(primeiroUso,500);
+        if(!DB.cfg.empresa) setTimeout(primeiroUso,500);
       }catch(e){ m.innerHTML='<span style="color:var(--bad)">'+esc(e.message)+'</span>'; }
     }}]);
 }
 
 /* ---- tela de login ---- */
-function pintaEmpresas(){
-  const box=document.getElementById('lgEmp'); if(!box) return;
-  box.innerHTML=EMPRESAS.map(e=>`<a class="${e.id===SB.emp?'on':''}" onclick="trocarEmpresa('${e.id}')">${esc(e.rot)}</a>`).join('');
-}
-function trocarEmpresa(id){ if(id===SB.emp) return; usarEmpresa(id,true); }
 function telaLogin(msg){
   const d=document.getElementById('login'); d.classList.remove('hidden');
-  pintaEmpresas();
   document.getElementById('lgMsg').innerHTML=msg||'';
   document.getElementById('lgUrl').value=SB.url;
   document.getElementById('lgKey').value=SB.key;
@@ -870,27 +874,54 @@ async function fazerLogin(){
   const e=paraEmail(document.getElementById('lgEmail').value);
   const s=document.getElementById('lgSenha').value;
   const m=document.getElementById('lgMsg');
-  if(!u||!k){ m.innerHTML='<span style="color:#f87171">Faltou o endereço do banco ou a chave.</span>'; mostrarCfg(); return; }
   if(!e||!s){ m.innerHTML='<span style="color:#dc2626">Preencha usuário e senha.</span>'; return; }
-  SB.url=u; SB.key=k; sbGravaCfg();
+
+  /* candidatos: se o usuário digitou banco na mão, usa só ele.
+     Senão, tenta cada empresa cadastrada — a que aceitar define de quem é o acesso. */
+  const manual = !!(u&&k) && document.getElementById('lgCfg').style.display!=='none';
+  const cands = manual ? [{id:SB.emp,rot:empresaDe(SB.emp).rot,url:u,key:k}]
+                       : EMPRESAS.filter(x=>x.url&&x.key);
+  if(!cands.length){ m.innerHTML='<span style="color:#dc2626">Nenhum banco configurado.</span>'; mostrarCfg(); return; }
+
   const bt=document.querySelector('#login .lgbt'); if(bt){ bt.disabled=true; bt.textContent='Entrando...'; }
   m.innerHTML='Verificando...';
+  let entrou=false, rede=false, naoConfirmado=false, outro='';
   try{
-    await entrar(e,s);
+    for(const emp of cands){
+      SB.emp=emp.id; SB.url=emp.url; SB.key=emp.key;
+      try{ await entrar(e,s); entrou=true; break; }
+      catch(x){
+        const t=x.message||'';
+        if(/Invalid login|invalid_credentials/i.test(t)) continue;
+        if(/internet|demorou/i.test(t)){ rede=true; continue; }
+        if(/not confirmed/i.test(t)){ naoConfirmado=true; continue; }
+        if(/Signups not allowed|signup_disabled/i.test(t)) continue;
+        outro=t;
+      }
+    }
+    if(!entrou){
+      SB.tok=null;
+      let t='Usuário ou senha incorretos.';
+      if(rede) t='Não consegui falar com o banco. Confira sua internet.';
+      else if(naoConfirmado) t='Seu acesso existe mas não foi confirmado. Peça para quem administra recriá-lo marcando "Auto Confirm User".';
+      else if(outro) t=outro;
+      m.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>';
+      return;
+    }
+    /* não usar usarEmpresa aqui: ela reescreve url/key a partir do array e
+       descartaria um banco digitado à mão na tela de login. */
+    try{ localStorage.setItem('sb_empresa',SB.emp); }catch(x){}
+    ajustaKEY(); sbGravaCfg(); sbGravaSessao();
     m.innerHTML='Carregando os dados...';
     await baixarTudo();
     document.getElementById('login').classList.add('hidden');
     document.getElementById('lgSenha').value='';
-    toast('Conectado ao banco');
+    toast('Conectado — '+empresaDe(SB.emp).rot);
     let trocou=false; try{ trocou=!!localStorage.getItem('sb_senha_ok_'+SB.emp); }catch(x){}
     if(!trocou) setTimeout(avisarSenha,600);
-    else if(!DB.cfg.empresa && !DB.clientes.length) setTimeout(primeiroUso,600);
+    else if(!DB.cfg.empresa) setTimeout(primeiroUso,600);
   }catch(x){
-    let t=x.message||'';
-    if(/Invalid login/i.test(t)) t='Usuário ou senha incorretos.';
-    if(/Failed to fetch/i.test(t)) t='Não consegui falar com o banco. Confira sua internet.';
-    if(/Signups not allowed|signup_disabled/i.test(t)) t='Cadastro fechado. Peça ao administrador para criar seu acesso.';
-    m.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>';
+    m.innerHTML='<span style="color:#dc2626">'+esc(x.message||'Erro ao entrar')+'</span>';
     SB.tok=null; sbGravaSessao();
   }finally{ const b2=document.querySelector('#login .lgbt'); if(b2){ b2.disabled=false; b2.textContent='Entrar'; } }
 }
@@ -914,8 +945,7 @@ async function iniciar(){
     return;
   }
   if(!SB.url||!SB.key){ load(); renderAll();
-    telaLogin('<b>'+esc(empresaDe(SB.emp).rot)+'</b> ainda não tem banco configurado.<br>Cole o endereço e a chave abaixo — é uma vez só.');
-    mostrarCfg(); return; }
+    telaLogin('Cole o endereço do banco e a chave — é uma vez só.'); mostrarCfg(); return; }
   if(SB.tok){
     try{ if(SB.exp && Date.now()>SB.exp) await renovar();
       await baixarTudo(); document.getElementById('login').classList.add('hidden'); return;
@@ -1643,9 +1673,12 @@ function salvarPedido(){
   let c=DB.clientes.find(x=>(doc&&x.doc===doc)||x.nome.toLowerCase()===nome.toLowerCase());
   if(!c){
     c={id:uid(),nome,doc,fantasia:document.getElementById('dFant').value.trim(),
-       cidade:document.getElementById('dCid').value.trim(),fone:document.getElementById('dFone').value.trim(),limite:0,obs:''};
+       cidade:document.getElementById('dCid').value.trim(),fone:document.getElementById('dFone').value.trim(),limite:0,obs:'',
+       endereco:EXTRA_CLI.endereco||'',cep:EXTRA_CLI.cep||''};
     DB.clientes.push(c);
   }else{
+    if(!c.endereco&&EXTRA_CLI.endereco) c.endereco=EXTRA_CLI.endereco;
+    if(!c.cep&&EXTRA_CLI.cep) c.cep=EXTRA_CLI.cep;
     if(!c.doc&&doc) c.doc=doc;
     if(!c.fone) c.fone=document.getElementById('dFone').value.trim();
     if(!c.cidade) c.cidade=document.getElementById('dCid').value.trim();
@@ -1705,7 +1738,7 @@ function limparNovo(){
   document.getElementById('dTotal').value=''; document.getElementById('dData').value=hoje();
   document.getElementById('pEnt').value=0; document.getElementById('pQtd').value=3;
   document.getElementById('pInt').value=30; document.getElementById('pIni').value='';
-  ITENS=[]; DESC=0; EDIT=null; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
+  ITENS=[]; DESC=0; EDIT=null; EXTRA_CLI={}; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
   const b=document.getElementById('btSalvarPed'); if(b) b.textContent='Salvar pedido';
   calcParcelas();
 }
@@ -1755,7 +1788,104 @@ function n2c(s){ return Math.round(parseFloat(String(s).replace(/\./g,'').replac
 function n2f(s){ return parseFloat(String(s).replace(/\./g,'').replace(',','.'))||0; }
 
 function parse(L,fname){
-  const R={itens:[]};
+  const bruto=L.join('\n');
+  if(/UpSeller|Romaneio|print-packing-slip/i.test(bruto)) return parseUpSeller(L,fname);
+  return parsePedidoOK(L,fname);
+}
+/* ---------- ROMANEIO DO UPSELLER (vendas do atacado) ---------- */
+function parseUpSeller(L,fname){
+  const R={itens:[],origem:'upseller'};
+  const txt=L.join('\n');
+  const lim=s=>String(s||'').replace(/\s{2,}/g,' ').trim();
+
+  // nº do pedido: a linha isolada tipo "#0804"
+  let m=txt.match(/^\s*#\s*(\d{1,10})\s*$/m);
+  if(m) R.num=String(parseInt(m[1],10));
+  if(!R.num){ m=txt.match(/upseller\s*#\s*:?\s*(\S+)/i); if(m) R.num=m[1]; }
+
+  // data: prefere "Hora do Pago"; se não houver, a data do cabeçalho
+  m=txt.match(/Hora do Pago:?\s*(\d{2}\/\d{2}\/\d{4})/i) || txt.match(/(\d{2}\/\d{2}\/\d{4})/);
+  if(m){ const d=m[1].split('/'); R.data=d[2]+'-'+d[1]+'-'+d[0]; }
+  R.pago=/Hora do Pago/i.test(txt);
+
+  // bloco do destinatário: começa depois de "Informações do Destinatário"
+  const iDest=L.findIndex(l=>/Informa[çc][õo]es do Destinat[áa]rio/i.test(l));
+  if(iDest>=0){
+    const corpo=[];
+    for(let k=iDest+1;k<Math.min(L.length,iDest+9);k++){
+      let t=lim(L[k]);
+      if(!t||/^#\s|Descri[çc][ãa]o do An[úu]ncio|Subtotal|M[ée]todo de Envio|N[ºo°] de Rastreio/i.test(t)) break;
+      // corta a coluna da direita (Info. de Pedido) quando vem colada
+      t=t.replace(/\s*(Hora do Pago|upseller\s*#|Nome da sua loja|ECOMPRAS|M[ée]todo de Envio|N[ºo°] de Rastreio|Subtotal).*$/i,'').trim();
+      if(t) corpo.push(t);
+    }
+    corpo.forEach(t=>{
+      const so=t.replace(/\D/g,'');
+      if(!R.nome && !/^\d+$/.test(t.replace(/\s/g,''))){ R.nome=t; return; }
+      if(!R.doc && (so.length===14||so.length===11) && so===t.replace(/\s/g,'')){
+        R.doc = so.length===14
+          ? so.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5')
+          : so.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4');
+        return;
+      }
+      if(!R.cep && so.length===8 && so===t.replace(/\s/g,'')){ R.cep=so.replace(/(\d{5})(\d{3})/,'$1-$2'); return; }
+      if(/\(\d{2}\)/.test(t)){ R.fone=t; return; }
+      if(!R.endereco) R.endereco=t;
+    });
+  }
+
+  // loja de origem entra como fantasia
+  m=txt.match(/Nome da sua loja:?\s*(.+)/i);
+  if(m) R.fantasia=lim(m[1]).slice(0,40);
+
+  // observação
+  const iObs=L.findIndex(l=>/^\s*Observa[çc][ãa]o\s*$/i.test(l));
+  if(iObs>=0){ const o=[];
+    for(let k=iObs+1;k<Math.min(L.length,iObs+5);k++){ const t=lim(L[k]);
+      if(!t||/^https?:/i.test(t)) break; o.push(t); }
+    R.obs=o.join(' · ');
+  }
+  m=txt.match(/Taxa de envio\s*R?\$?\s*([\d.,]+)/i);
+  if(m && n2c(m[1])>0) R.obs=(R.obs?R.obs+' · ':'')+'Frete '+m[1];
+
+  // total: a linha "Total R$ ..." (não a de Subtotal)
+  const lt=L.filter(l=>/^\s*Total\b/i.test(lim(l))).pop();
+  if(lt){ const ms=lim(lt).match(MONEY); if(ms&&ms.length) R.total=n2c(ms[ms.length-1]); }
+  if(!R.total){ const ls=L.filter(l=>/^\s*Subtotal\b/i.test(lim(l))).pop();
+    if(ls){ const ms=lim(ls).match(MONEY); if(ms&&ms.length) R.total=n2c(ms[ms.length-1]); } }
+  m=txt.match(/Desconto\s*R?\$?\s*([\d.,]+)/i);
+  if(m) R.desc=n2c(m[1]);
+
+  /* itens: "DESCRIÇÃO x QTD UNIT TOTAL", com o número do item podendo aparecer
+     antes ou colado no fim da descrição (depende de como o PDF ordena as colunas).
+     O SKU vem 1-2 linhas abaixo. */
+  L.forEach((l,k)=>{
+    const t=lim(l);
+    const mm=t.match(/^(.*?)\s*\bx\s*([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s*$/i);
+    if(!mm) return;
+    let d=lim(mm[1]);
+    if(!d) return;
+    const seq=R.itens.length+1;                       // o índice esperado deste item
+    d=d.replace(new RegExp('^0*'+seq+'\\s+'),'')      // "1 PELUCIA..."
+       .replace(new RegExp('0*'+seq+'$'),'')           // "...PELUCIA1"
+       .trim();
+    if(!d) return;
+    const it={cod:'',desc:d,un:'UN',qtd:n2f(mm[2]),unit:n2c(mm[3]),total:n2c(mm[4])};
+    for(let z=k+1;z<Math.min(L.length,k+4);z++){
+      const d=lim(L[z]);
+      if(!d||d==='-') continue;
+      if(/^Subtotal|^Total|^\d{1,3}\s/i.test(d)) break;
+      if(/^[A-Z0-9._\-]{3,30}$/.test(d)){ it.cod=d; break; }
+      break;
+    }
+    R.itens.push(it);
+  });
+  if(!R.total&&R.itens.length) R.total=R.itens.reduce((s,i)=>s+i.total,0);
+  return R;
+}
+/* ---------- PEDIDO DO PEDIDOOK ---------- */
+function parsePedidoOK(L,fname){
+  const R={itens:[],origem:'pedidook'};
   const txt=L.join('\n');
   const idx=lbl=>L.findIndex(l=>l.toUpperCase().indexOf(lbl)>=0);
   const prox=i=>{ for(let k=i+1;k<Math.min(L.length,i+5);k++){ if(L[k].trim()) return L[k]; } return ''; };
@@ -1815,7 +1945,9 @@ function parse(L,fname){
   return R;
 }
 
+let EXTRA_CLI={};
 function aplicar(R){
+  EXTRA_CLI={endereco:R.endereco||'',cep:R.cep||''};
   if(R.num) document.getElementById('dNum').value=R.num;
   if(R.data) document.getElementById('dData').value=R.data;
   if(R.nome) document.getElementById('dCli').value=R.nome;
@@ -1825,10 +1957,24 @@ function aplicar(R){
   if(R.fone) document.getElementById('dFone').value=R.fone;
   if(R.obs) document.getElementById('dObs').value=R.obs;
   if(R.total) document.getElementById('dTotal').value=(R.total/100).toFixed(2);
-  ITENS=R.itens||[]; DESC=0;
+  ITENS=R.itens||[]; DESC=R.desc||0;
   pintaItens();
-  const ok=[R.nome&&'cliente',R.doc&&'CNPJ',R.data&&'data',R.total&&'valor total',ITENS.length&&(ITENS.length+' itens')].filter(Boolean).join(', ');
-  msg('<b>PDF lido ✓</b> — reconheci: '+(ok||'pouca coisa')+'. Confira os campos ao lado antes de salvar.','ok');
+  if(R.origem==='upseller'){
+    // romaneio do UpSeller é venda já paga: sugere à vista na data do pedido
+    document.getElementById('pQtd').value=1;
+    document.getElementById('pInt').value=0;
+    document.getElementById('pEnt').value=0;
+    document.getElementById('pIni').value=R.data||hoje();
+  }
+  const ok=[R.num&&('pedido '+R.num),R.nome&&'cliente',R.doc&&'CNPJ/CPF',R.data&&'data',
+    R.total&&'valor total',R.cep&&'CEP',R.endereco&&'endereço',
+    ITENS.length&&(ITENS.length+' item(ns)')].filter(Boolean).join(', ');
+  const falta=[!R.nome&&'cliente',!R.total&&'valor total',!ITENS.length&&'itens'].filter(Boolean).join(', ');
+  const nome={upseller:'Romaneio do UpSeller',pedidook:'Pedido do PedidoOK'}[R.origem]||'PDF';
+  msg('<b>'+nome+' lido ✓</b> — reconheci: '+(ok||'pouca coisa')+'.'
+    +(falta?' <b>Não achei:</b> '+falta+' — preencha na mão.':'')
+    +(R.pago?'<br>Esse romaneio consta como <b>pago</b> no UpSeller. Deixei como <b>à vista na data do pedido</b>; depois de salvar, dê a baixa na parcela.':'')
+    +'<br>Confira os campos ao lado antes de salvar.', falta?'':'ok');
   calcParcelas();
 }
 
