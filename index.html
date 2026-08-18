@@ -199,6 +199,7 @@
     <a onclick="abrirConfig()">⚙ Configuração</a>
     <a onclick="exportarJSON()">↓ Backup (.json)</a>
     <a onclick="document.getElementById('impFile').click()">↑ Restaurar backup</a>
+    <a onclick="restaurarNuvem()">☁ Restaurar do banco (por dia)</a>
     <a onclick="carregarExemplo()">◈ Carregar dados de exemplo</a>
     <a onclick="zerarTudo()">✕ Apagar tudo</a>
     <a id="btSenha" class="hidden" onclick="trocarSenha()">🔒 Trocar minha senha</a>
@@ -516,7 +517,7 @@ function usarEmpresa(id,recarregar){
 function paraEmail(v){ v=String(v||'').trim(); if(!v) return ''; return v.indexOf('@')>=0?v.toLowerCase():v.toLowerCase().replace(/[^a-z0-9._-]/g,'')+DOMINIO; }
 function paraNome(v){ v=String(v||''); return v.endsWith(DOMINIO)?v.slice(0,-DOMINIO.length):v; }
 const SB={emp:'mazen',url:'',key:'',tok:null,ref:null,exp:0,email:'',pronto:false,carregando:false};
-let SYNC=null, ESPELHO={c:{},p:{}};
+let SYNC=null, SYNCANDO=false, ESPELHO={c:{},p:{}};
 
 function sbCarregaCfg(){
   const e=empresaDe(empresaAtual());
@@ -603,6 +604,7 @@ const upsert=(tab,linhas)=> linhas.length? rest('POST',tab,linhas,{'Prefer':'res
 /* ---- carga inicial ---- */
 async function baixarTudo(){
   SB.carregando=true;
+  try{
   const [cl,pe,it,pa,re,cf]=await Promise.all([
     rest('GET','clientes?select=*&order=nome'),
     rest('GET','pedidos?select=*&order=data.desc'),
@@ -637,14 +639,17 @@ async function baixarTudo(){
   _save(); SB.pronto=true; SB.carregando=false; PENDENTE=false; renderAll(); pintaNuvem();
   const vs=(cf||[]).find(x=>x.chave==='versao'); VERSAO=vs?vs.valor:VERSAO;
   ligarVigia();
+  backupDiario();
+  }finally{ SB.carregando=false; }
 }
 
 /* ---- gravação incremental: manda só o que mudou ---- */
 async function subirMudancas(){
-  if(!SB.pronto||SB.carregando) return;
+  if(!SB.pronto||SB.carregando||SYNCANDO) return;
   const el=document.getElementById('nuvemSt');
   const cli=[],ped=[],ite=[],par=[],rec=[],apagaP=[],apagaC=[];
-  DB.clientes.forEach(c=>{ const j=JSON.stringify(c); if(ESPELHO.c[c.id]!==j)
+  const jC={}, jP={};
+  DB.clientes.forEach(c=>{ const j=JSON.stringify(c); jC[c.id]=j; if(ESPELHO.c[c.id]!==j)
     cli.push({id:c.id,nome:c.nome,fantasia:c.fantasia||null,doc:c.doc||null,cidade:c.cidade||null,fone:c.fone||null,
       limite:c.limite||0,obs:c.obs||null,email:c.email||null,ie:c.ie||null,contato:c.contato||null,
       endereco:c.endereco||null,bairro:c.bairro||null,cep:c.cep||null,transp:c.transp||null,prazo:c.prazo||null}); });
@@ -652,7 +657,7 @@ async function subirMudancas(){
   Object.keys(ESPELHO.c).forEach(id=>{ if(!vivosC[id]) apagaC.push(id); });
 
   const mudados=[];
-  DB.pedidos.forEach(p=>{ const j=JSON.stringify(p); if(ESPELHO.p[p.id]===j) return; mudados.push(p);
+  DB.pedidos.forEach(p=>{ const j=JSON.stringify(p); jP[p.id]=j; if(ESPELHO.p[p.id]===j) return; mudados.push(p);
     ped.push({id:p.id,num:String(p.num),data:p.data||null,cliente_id:p.clienteId,total:p.total||0,cond:p.cond||null,obs:p.obs||null,desconto:p.desc||0});
     (p.itens||[]).forEach((i,k)=>ite.push({id:p.id+'-'+k,pedido_id:p.id,seq:k,cod:i.cod||null,descricao:i.desc||null,un:i.un||null,qtd:i.qtd||0,unit:i.unit||0,total:i.total||0}));
     (p.parcelas||[]).forEach((x,k)=>{ const pid=p.id+'-'+(k+1);
@@ -665,6 +670,7 @@ async function subirMudancas(){
   Object.keys(ESPELHO.p).forEach(id=>{ if(!vivosP[id]) apagaP.push(id); });
 
   if(!cli.length&&!mudados.length&&!apagaP.length&&!apagaC.length) return;
+  SYNCANDO=true;
   try{
     if(el){ el.innerHTML='☁ gravando...'; el.style.color='#38bdf8'; }
     if(apagaP.length) await rest('DELETE','pedidos?id=in.('+apagaP.map(encodeURIComponent).join(',')+')');
@@ -679,17 +685,38 @@ async function subirMudancas(){
     await upsert('parcelas',par);
     await upsert('recebimentos',rec);
     await upsert('config',[{chave:'empresa',valor:DB.cfg.empresa||''}]);
-    DB.clientes.forEach(c=>ESPELHO.c[c.id]=JSON.stringify(c));
-    DB.pedidos.forEach(p=>ESPELHO.p[p.id]=JSON.stringify(p));
+    /* marca no ESPELHO só o que REALMENTE subiu — o estado do momento em que o pacote
+       foi montado. Reler o DB aqui apagava alterações feitas durante o envio (perda silenciosa). */
+    Object.keys(jC).forEach(id=>ESPELHO.c[id]=jC[id]);
+    Object.keys(jP).forEach(id=>ESPELHO.p[id]=jP[id]);
     apagaP.forEach(id=>delete ESPELHO.p[id]); apagaC.forEach(id=>delete ESPELHO.c[id]);
-    PENDENTE=false;
     VERSAO=await lerVersao()||VERSAO;
     if(el){ el.innerHTML='☁ gravado '+new Date().toLocaleTimeString('pt-BR').slice(0,5)+'<br><span style="color:#334155">'+esc(empresaDe(SB.emp).rot)+' · '+esc(paraNome(SB.email))+'</span>'; }
+    /* algo mudou enquanto gravava? agenda outra rodada para não deixar nada para trás */
+    if(pendente()){ PENDENTE=true; clearTimeout(SYNC); SYNC=setTimeout(subirMudancas,1200); }
+    else PENDENTE=false;
   }catch(e){
-    if(el){ el.innerHTML='☁ <span style="color:#f87171">falhou — tentando de novo</span>'; }
-    clearTimeout(SYNC); SYNC=setTimeout(subirMudancas,8000);
-    console.warn('sync:',e.message);
-  }
+    const m2=e.message||'';
+    if(/Já existe um pedido|Sem permissão|Tabela não encontrada/i.test(m2)){
+      /* erro que repetir não conserta: não fica em loop de 8 em 8s; avisa e tenta na próxima alteração */
+      if(el){ el.innerHTML='☁ <span style="color:#f87171">não consegui gravar</span>'; }
+      toast('Não consegui gravar no banco: '+m2);
+    }else{
+      if(el){ el.innerHTML='☁ <span style="color:#f87171">falhou — tentando de novo</span>'; }
+      clearTimeout(SYNC); SYNC=setTimeout(subirMudancas,8000);
+    }
+    console.warn('sync:',m2);
+  }finally{ SYNCANDO=false; }
+}
+/* há alteração local ainda não gravada no banco? */
+function pendente(){
+  for(const c of DB.clientes){ if(ESPELHO.c[c.id]!==JSON.stringify(c)) return true; }
+  for(const p of DB.pedidos){ if(ESPELHO.p[p.id]!==JSON.stringify(p)) return true; }
+  const vC={}; DB.clientes.forEach(c=>vC[c.id]=1);
+  if(Object.keys(ESPELHO.c).some(id=>!vC[id])) return true;
+  const vP={}; DB.pedidos.forEach(p=>vP[p.id]=1);
+  if(Object.keys(ESPELHO.p).some(id=>!vP[id])) return true;
+  return false;
 }
 function agendaSync(){
   if(!SB.pronto) return;
@@ -711,8 +738,8 @@ async function vigiar(){
   if(v===null||v==='') return;
   if(VERSAO && v!==VERSAO){
     VERSAO=v;
-    await baixarTudo();
-    toast('Atualizado — alguém alterou os dados em outro computador');
+    try{ await baixarTudo(); toast('Atualizado — alguém alterou os dados em outro computador'); }
+    catch(e){ /* rede instável: tenta de novo no próximo ciclo, sem travar */ }
   } else if(!VERSAO) VERSAO=v;
 }
 function ligarVigia(){
@@ -1987,9 +2014,49 @@ function exportarJSON(){
 document.getElementById('impFile').onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   const r=new FileReader();
-  r.onload=()=>{ try{ DB=JSON.parse(r.result); save(); renderAll(); toast('Backup restaurado'); }catch(x){ toast('Arquivo inválido'); } };
+  r.onload=()=>{ try{ const d=JSON.parse(r.result);
+      if(!d||typeof d!=='object'||!Array.isArray(d.clientes)||!Array.isArray(d.pedidos)){ toast('Esse arquivo não parece um backup do sistema.'); return; }
+      DB=d; if(!DB.cfg) DB.cfg={empresa:''}; save(); renderAll(); toast('Backup restaurado');
+    }catch(x){ toast('Arquivo inválido'); } };
   r.readAsText(f);
 };
+
+/* ---- backup automático diário, guardado no próprio Supabase (tabela 'backups') ---- */
+async function backupDiario(){
+  if(!SB.tok||!SB.url) return;
+  try{
+    const dia=hoje();
+    const ex=await rest('GET','backups?dia=eq.'+dia+'&select=dia');
+    if(ex&&ex.length) return;                        // o backup de hoje já foi feito
+    await rest('POST','backups',[{dia,criado_em:new Date().toISOString(),dados:DB}]);
+    await rest('DELETE','backups?dia=lt.'+addDias(dia,-90));   // mantém os últimos 90 dias
+  }catch(e){ /* silencioso: se a tabela ainda não existe, não atrapalha nada */ }
+}
+async function restaurarNuvem(){
+  if(!SB.tok){ alert('Entre no sistema primeiro.'); return; }
+  let lista;
+  try{ lista=await rest('GET','backups?select=dia,criado_em&order=dia.desc&limit=120'); }
+  catch(e){ alert('Não consegui ler os backups: '+e.message); return; }
+  if(!lista||!lista.length){ alert('Ainda não há backups salvos no banco.\n\nO primeiro é criado sozinho quando você abre o sistema — depois que a tabela de backups estiver criada no Supabase.'); return; }
+  modal('Restaurar de um dia',`
+    <p style="font-size:13px;line-height:1.55;color:var(--muted);margin:0 0 12px">
+      Escolha o dia. O sistema vai <b>substituir</b> os dados atuais pelos daquele dia,
+      no banco de <b>${esc(empresaDe(SB.emp).rot)}</b>, e gravar. Se quiser um seguro extra, clique antes em ↓ Backup (.json).</p>
+    <div class="fld"><label>Backup do dia</label>
+      <select id="bkDia">${lista.map(b=>`<option value="${esc(b.dia)}">${dbr(b.dia)}</option>`).join('')}</select></div>`,
+    [{txt:'Restaurar este dia',cls:'btn dang',fn:async()=>{
+      const dia=document.getElementById('bkDia').value;
+      if(!confirm('Restaurar o backup de '+dbr(dia)+'?\n\nOs dados atuais de '+empresaDe(SB.emp).rot+' serão substituídos pelos desse dia.')) return;
+      try{
+        const r=await rest('GET','backups?dia=eq.'+encodeURIComponent(dia)+'&select=dados');
+        const d=r&&r[0]&&r[0].dados;
+        if(!d||!Array.isArray(d.clientes)||!Array.isArray(d.pedidos)){ alert('Esse backup está vazio ou inválido.'); return; }
+        DB=d; if(!DB.cfg) DB.cfg={empresa:''};
+        save(); fecharModal(); renderAll();
+        toast('Backup de '+dbr(dia)+' restaurado');
+      }catch(e){ alert('Não consegui restaurar: '+e.message); }
+    }}]);
+}
 function exportarCSV(){
   const ps=filtradas();
   const linhas=[['Vencimento','Cliente','CNPJ','Pedido','Parcela','Valor','Pago','Saldo','Status']];
