@@ -198,12 +198,14 @@
     <a onclick="recarregarDoBanco()">↻ Recarregar do banco</a>
     <a onclick="abrirConfig()">⚙ Configuração</a>
     <a onclick="exportarJSON()">↓ Backup (.json)</a>
-    <a onclick="document.getElementById('impFile').click()">↑ Restaurar backup</a>
-    <a onclick="restaurarNuvem()">☁ Restaurar do banco (por dia)</a>
-    <a onclick="carregarExemplo()">◈ Carregar dados de exemplo</a>
-    <a onclick="zerarTudo()">✕ Apagar tudo</a>
     <a id="btSenha" class="hidden" onclick="trocarSenha()">🔒 Trocar minha senha</a>
     <a id="btSair" class="hidden" onclick="sair()">⏻ Sair</a>
+    <a onclick="toggleAvancado()" style="margin-top:9px;opacity:.65">⋯ Avançado</a>
+    <div id="avancado" class="hidden">
+      <a onclick="document.getElementById('impFile').click()">↑ Restaurar backup (.json)</a>
+      <a onclick="restaurarNuvem()">☁ Restaurar do banco (por dia)</a>
+      <a onclick="zerarTudo()" style="color:#f87171">✕ Apagar tudo</a>
+    </div>
     <input type="file" id="impFile" accept=".json" class="hidden">
   </div>
 </aside>
@@ -2116,36 +2118,13 @@ function imprimirExtrato(id){
   </body></html>`);
   w.document.close(); setTimeout(()=>w.print(),400);
 }
-function zerarTudo(){ if(!confirm('Apagar TODOS os clientes e pedidos?')) return; DB={cfg:DB.cfg,clientes:[],pedidos:[]}; save(); renderAll(); toast('Tudo apagado'); }
-
-function carregarExemplo(){
-  if(DB.pedidos.length&&!confirm('Isso vai substituir os dados atuais. Continuar?')) return;
-  const h=hoje();
-  const c1={id:uid(),nome:'MERCADO SÃO JORGE LTDA',fantasia:'Mercado São Jorge',doc:'12.345.678/0001-90',cidade:'São Paulo / SP',fone:'(11) 98877-1122',limite:2000000,obs:''};
-  const c2={id:uid(),nome:'ATACADÃO SILVA COMERCIO LTDA',fantasia:'Atacadão Silva',doc:'98.765.432/0001-10',cidade:'Guarulhos / SP',fone:'(11) 97766-3344',limite:2500000,obs:''};
-  const c3={id:uid(),nome:'DEPOSITO NOVA ERA EIRELI',fantasia:'Depósito Nova Era',doc:'45.678.912/0001-33',cidade:'Osasco / SP',fone:'(11) 95544-8899',limite:1500000,obs:''};
-  DB={cfg:DB.cfg,clientes:[c1,c2,c3],pedidos:[
-    {id:uid(),num:'1042',data:addDias(h,-80),clienteId:c1.id,total:945000,cond:'3x',obs:'NF 021',
-      itens:[{cod:'FOG-100',desc:'FOGAREIRO A GÁS 1 BOCA',un:'CX12',qtd:50,unit:4890,total:244500},
-             {cod:'GRE-012',desc:'GRELHA FERRO FUNDIDO 30CM',un:'CX24',qtd:80,unit:3000,total:240000}],
-      parcelas:[{venc:addDias(h,-50),valor:315000,pagos:[{valor:315000,data:addDias(h,-52),obs:'pix'}]},
-                {venc:addDias(h,-19),valor:315000,pagos:[]},
-                {venc:addDias(h,11),valor:315000,pagos:[]}]},
-    {id:uid(),num:'1049',data:addDias(h,-33),clienteId:c2.id,total:1100006,cond:'Entrada + 6x',obs:'CONTAINER CHALEIRAS',
-      itens:[{cod:'MZ3001',desc:'CHALEIRA ELETRICA 110V 1500W 1.8L',un:'CX16',qtd:200,unit:3000,total:600000}],
-      parcelas:[{venc:addDias(h,-33),valor:150000,pagos:[{valor:150000,data:addDias(h,-33),obs:'entrada'}]},
-                {venc:addDias(h,5),valor:158334,pagos:[]},{venc:addDias(h,35),valor:158334,pagos:[]},
-                {venc:addDias(h,65),valor:158334,pagos:[]},{venc:addDias(h,95),valor:158334,pagos:[]},
-                {venc:addDias(h,125),valor:158334,pagos:[]},{venc:addDias(h,155),valor:158336,pagos:[]}]},
-    {id:uid(),num:'1038',data:addDias(h,-97),clienteId:c3.id,total:2480000,cond:'4x',obs:'',
-      itens:[],
-      parcelas:[{venc:addDias(h,-67),valor:620000,pagos:[{valor:620000,data:addDias(h,-67),obs:''}]},
-                {venc:addDias(h,-37),valor:620000,pagos:[{valor:620000,data:addDias(h,-35),obs:''}]},
-                {venc:addDias(h,-6),valor:620000,pagos:[{valor:100000,data:addDias(h,-6),obs:'parcial'}]},
-                {venc:addDias(h,24),valor:620000,pagos:[]}]}
-  ]};
-  save(); renderAll(); toast('Dados de exemplo carregados'); go('visao');
+function zerarTudo(){
+  const rot=empresaDe(SB.emp).rot;
+  if(!confirm('APAGAR TODOS os clientes e pedidos de "'+rot+'"?\n\nIsso não pode ser desfeito. Se precisar, dá para recuperar depois em "Restaurar do banco (por dia)".')) return;
+  if(!confirm('Tem certeza mesmo? Vou apagar tudo de "'+rot+'" agora.')) return;
+  DB={cfg:DB.cfg,clientes:[],pedidos:[]}; save(); renderAll(); toast('Tudo apagado');
 }
+function toggleAvancado(){ const a=document.getElementById('avancado'); if(a) a.classList.toggle('hidden'); }
 
 /* ================= MODAL ================= */
 function modal(titulo,html,botoes){
