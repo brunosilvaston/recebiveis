@@ -1744,7 +1744,8 @@ function salvarPedido(){
   const nEnt=PARC[0]&&PARC[0].ent?1:0;
   const cond=(nEnt?'Entrada + ':'')+(PARC.length-nEnt)+'x';
   const base={num, data:document.getElementById('dData').value||hoje(), clienteId:c.id, total, cond,
-    desc:DESC, obs:document.getElementById('dObs').value.trim(), itens:ITENS.slice()};
+    desc:DESC, obs:document.getElementById('dObs').value.trim(),
+    itens:ITENS.filter(i=>(i.desc||'').trim()||(i.cod||'').trim()||i.total>0)};
 
   if(EDIT){
     const alvo=EDIT;
@@ -1795,7 +1796,7 @@ function limparNovo(){
   document.getElementById('dTotal').value=''; document.getElementById('dData').value=hoje();
   document.getElementById('pEnt').value=0; document.getElementById('pQtd').value=3;
   document.getElementById('pInt').value=30; document.getElementById('pIni').value='';
-  ITENS=[]; DESC=0; EDIT=null; EXTRA_CLI={}; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
+  ITENS=[{cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}]; DESC=0; EDIT=null; EXTRA_CLI={}; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
   const b=document.getElementById('btSalvarPed'); if(b) b.textContent='Salvar pedido';
   calcParcelas();
 }
@@ -2171,6 +2172,7 @@ function fecharModal(){ const m=document.getElementById('mdl'); if(m) m.remove()
 function renderAll(){ renderVisao(); renderReceber(); renderClientes(); renderPedidos(); }
 load();
 document.getElementById('dData').value=hoje();
+ITENS=[{cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}]; pintaItens();
 calcParcelas();
 periodo('tudo');
 marcaAtalho('ped','tudo');
