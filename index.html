@@ -1591,17 +1591,10 @@ function excluirPedido(id){
 /* ================= PARCELAMENTO ================= */
 let PARC=[];
 function preset(n,int){ document.getElementById('pQtd').value=n; document.getElementById('pInt').value=int; if(n===1&&int===0){document.getElementById('pIni').value=document.getElementById('dData').value||hoje();} calcParcelas(); }
-/* cria as parcelas com as datas, mas com valor ZERO — para você digitar cada valor na mão */
+/* apaga todas as parcelas e deixa a lista vazia — você adiciona uma a uma no "+ Adicionar parcela" */
 function parcelasEmBranco(){
   const total=r2c(document.getElementById('dTotal').value);
-  const ent=r2c(document.getElementById('pEnt').value);
-  const n=Math.max(1,parseInt(document.getElementById('pQtd').value||1));
-  const inter=parseInt(document.getElementById('pInt').value||30);
-  let ini=document.getElementById('pIni').value;
-  if(!ini){ ini=addDias(document.getElementById('dData').value||hoje(),inter||30); document.getElementById('pIni').value=ini; }
   PARC=[];
-  if(ent>0) PARC.push({venc:document.getElementById('dData').value||hoje(),valor:ent,ent:true});
-  for(let i=0;i<n;i++) PARC.push({venc:addDias(ini,inter*i),valor:0});
   pintaParc(total);
 }
 function calcParcelas(){
@@ -1648,7 +1641,8 @@ function atualizaSomaParc(total){
 function addParcela(total){
   const ult=PARC[PARC.length-1];
   const inter=parseInt(document.getElementById('pInt').value||30);
-  PARC.push({venc:ult?addDias(ult.venc,inter):hoje(),valor:0});
+  const prim=document.getElementById('pIni').value||document.getElementById('dData').value||hoje();
+  PARC.push({venc:ult?addDias(ult.venc,inter):prim,valor:0});
   pintaParc(total);
 }
 function distribuirResto(total){
