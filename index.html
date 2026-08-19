@@ -351,8 +351,7 @@
   <header class="top">
     <div><h1>Lançar Pedido</h1><div class="sub">Anexe o PDF → confira os dados → defina o parcelamento</div></div>
   </header>
-  <div class="grid2">
-    <div>
+  <div style="max-width:920px">
       <div class="panel">
         <h2>1. PDF do pedido <small>opcional — dá para digitar na mão</small></h2>
         <div class="pad">
@@ -382,13 +381,16 @@
             <div class="fld"><label>Telefone</label><input type="text" id="dFone"></div>
           </div>
           <div class="row"><div class="fld"><label>Observação</label><input type="text" id="dObs" placeholder="NF, container, etc."></div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>3. Produtos do pedido <small>adicione ou edite os itens do pedido</small></h2>
+        <div class="pad">
           <div id="itensBox"></div>
         </div>
       </div>
-    </div>
-
-    <div class="panel">
-      <h2>3. Parcelamento <small>valores conferem sempre</small></h2>
+      <div class="panel">
+      <h2>4. Parcelamento <small>valores conferem sempre</small></h2>
       <div class="pad">
         <div class="row r3">
           <div class="fld"><label>Entrada (R$)</label><input type="number" id="pEnt" value="0" step="0.01" oninput="calcParcelas()"></div>
