@@ -406,6 +406,7 @@
           <span class="pill" onclick="preset(4,30)">4x</span>
           <span class="pill" onclick="preset(6,30)">6x</span>
           <span class="pill" onclick="preset(12,30)">12x</span>
+          <span class="pill" onclick="parcelasEmBranco()" style="border-style:dashed">Em branco (eu coloco)</span>
         </div>
         <div id="tabParc"></div>
         <div class="mini" style="margin-top:8px">Dá para editar data e valor de cada parcela na mão — a soma é conferida abaixo.</div>
@@ -1588,6 +1589,19 @@ function excluirPedido(id){
 /* ================= PARCELAMENTO ================= */
 let PARC=[];
 function preset(n,int){ document.getElementById('pQtd').value=n; document.getElementById('pInt').value=int; if(n===1&&int===0){document.getElementById('pIni').value=document.getElementById('dData').value||hoje();} calcParcelas(); }
+/* cria as parcelas com as datas, mas com valor ZERO — para você digitar cada valor na mão */
+function parcelasEmBranco(){
+  const total=r2c(document.getElementById('dTotal').value);
+  const ent=r2c(document.getElementById('pEnt').value);
+  const n=Math.max(1,parseInt(document.getElementById('pQtd').value||1));
+  const inter=parseInt(document.getElementById('pInt').value||30);
+  let ini=document.getElementById('pIni').value;
+  if(!ini){ ini=addDias(document.getElementById('dData').value||hoje(),inter||30); document.getElementById('pIni').value=ini; }
+  PARC=[];
+  if(ent>0) PARC.push({venc:document.getElementById('dData').value||hoje(),valor:ent,ent:true});
+  for(let i=0;i<n;i++) PARC.push({venc:addDias(ini,inter*i),valor:0});
+  pintaParc(total);
+}
 function calcParcelas(){
   const total=r2c(document.getElementById('dTotal').value);
   const ent=r2c(document.getElementById('pEnt').value);
@@ -1613,14 +1627,18 @@ function pintaParc(total){
     <thead><tr><th style="padding-left:12px">Parcela</th><th>Vencimento</th><th class="num" style="padding-right:12px">Valor (R$)</th></tr></thead><tbody>
     ${PARC.map((p,i)=>`<tr><td style="padding-left:12px"><b>${p.ent?'Entrada':(p.ent?'':((PARC[0]&&PARC[0].ent?i:i+1)+'/'+(PARC[0]&&PARC[0].ent?PARC.length-1:PARC.length)))}</b></td>
       <td><input type="date" value="${p.venc}" onchange="PARC[${i}].venc=this.value" style="width:145px"></td>
-      <td class="num" style="padding-right:12px"><input type="number" step="0.01" value="${(p.valor/100).toFixed(2)}" onchange="PARC[${i}].valor=Math.round(this.value*100);pintaParc(${total})" style="width:110px;text-align:right">
+      <td class="num" style="padding-right:12px"><input type="number" step="0.01" value="${(p.valor/100).toFixed(2)}" onchange="PARC[${i}].valor=Math.round(this.value*100);atualizaSomaParc(${total})" style="width:110px;text-align:right">
       <a class="lnk" style="color:var(--bad);margin-left:6px" onclick="PARC.splice(${i},1);pintaParc(${total})">✕</a></td></tr>`).join('')}
     </tbody></table>
     <div style="margin-top:8px"><button class="btn sm ghost" onclick="addParcela(${total})">+ Adicionar parcela</button>
     <button class="btn sm ghost" onclick="distribuirResto(${total})">Distribuir o que falta</button></div>`;
+  atualizaSomaParc(total);
+}
+function atualizaSomaParc(total){
   const soma=PARC.reduce((s,p)=>s+p.valor,0);
   const dif=total-soma;
-  document.getElementById('somaBox').innerHTML = dif===0
+  const box=document.getElementById('somaBox'); if(!box) return;
+  box.innerHTML = dif===0
     ? `<div class="note ok"><b>Soma das parcelas: ${c2r(soma)}</b> — confere com o total do pedido ✓</div>`
     : `<div class="note err"><b>Soma das parcelas: ${c2r(soma)}</b> — diferença de ${c2r(dif)} em relação ao total (${c2r(total)}).</div>`;
 }
@@ -1657,17 +1675,17 @@ function pintaItens(){
       <td style="padding-left:12px"><input class="ed" style="width:88px" value="${esc(i.cod||'')}" onchange="ITENS[${k}].cod=this.value"></td>
       <td><input class="ed" style="width:100%;min-width:170px" value="${esc(i.desc||'')}" onchange="ITENS[${k}].desc=this.value"></td>
       <td><input class="ed" style="width:48px" value="${esc(i.un||'')}" onchange="ITENS[${k}].un=this.value"></td>
-      <td class="num"><input class="ed num" type="number" step="0.001" style="width:86px" value="${i.qtd}" onchange="itemCalc(${k},'qtd',this.value)"></td>
-      <td class="num"><input class="ed num" type="number" step="0.01" style="width:96px" value="${(i.unit/100).toFixed(2)}" onchange="itemCalc(${k},'unit',this.value)"></td>
-      <td class="num"><input class="ed num" type="number" step="0.01" style="width:106px;font-weight:700" value="${(i.total/100).toFixed(2)}" onchange="itemCalc(${k},'total',this.value)"></td>
+      <td class="num"><input id="it${k}q" class="ed num" type="number" step="0.001" style="width:86px" value="${i.qtd}" onchange="itemCalc(${k},'qtd',this.value)"></td>
+      <td class="num"><input id="it${k}u" class="ed num" type="number" step="0.01" style="width:96px" value="${(i.unit/100).toFixed(2)}" onchange="itemCalc(${k},'unit',this.value)"></td>
+      <td class="num"><input id="it${k}t" class="ed num" type="number" step="0.01" style="width:106px;font-weight:700" value="${(i.total/100).toFixed(2)}" onchange="itemCalc(${k},'total',this.value)"></td>
       <td style="padding-right:12px"><a class="lnk" style="color:var(--bad)" onclick="ITENS.splice(${k},1);pintaItens()">✕</a></td></tr>`).join('')}
     </tbody></table>
     <div class="row r2" style="margin-top:10px">
-      <div class="fld"><label>Soma dos produtos</label><input type="text" value="${c2n(bruto)}" disabled></div>
-      <div class="fld"><label>Desconto (R$)</label><input type="number" step="0.01" id="dDesc" value="${(DESC/100).toFixed(2)}" onchange="DESC=r2c(this.value);pintaItens()"></div>
+      <div class="fld"><label>Soma dos produtos</label><input id="itSoma" type="text" value="${c2n(bruto)}" disabled></div>
+      <div class="fld"><label>Desconto (R$)</label><input type="number" step="0.01" id="dDesc" value="${(DESC/100).toFixed(2)}" onchange="DESC=r2c(this.value);atualizaSomaItens()"></div>
     </div>
     <div class="note" style="display:flex;justify-content:space-between;align-items:center">
-      <span>Total dos produtos menos o desconto: <b>${c2r(bruto-DESC)}</b></span>
+      <span>Total dos produtos menos o desconto: <b id="itMenos">${c2r(bruto-DESC)}</b></span>
       <button class="btn sm" onclick="usarTotalItens()">Usar como total do pedido</button></div>`:''}`;
 }
 let DESC=0;
@@ -1676,7 +1694,17 @@ function itemCalc(k,campo,valor){
   if(campo==='qtd'){ i.qtd=parseFloat(String(valor).replace(',','.'))||0; i.total=Math.round(i.qtd*i.unit); }
   if(campo==='unit'){ i.unit=r2c(valor); i.total=Math.round(i.qtd*i.unit); }
   if(campo==='total'){ i.total=r2c(valor); if(i.qtd) i.unit=Math.round(i.total/i.qtd); }
-  pintaItens();
+  /* atualiza só as células recalculadas — não redesenha a tabela, então você não perde
+     o foco nem o que está digitando nos outros campos */
+  const u=document.getElementById('it'+k+'u'), t=document.getElementById('it'+k+'t');
+  if(campo!=='unit'&&u) u.value=(i.unit/100).toFixed(2);
+  if(campo!=='total'&&t) t.value=(i.total/100).toFixed(2);
+  atualizaSomaItens();
+}
+function atualizaSomaItens(){
+  const bruto=ITENS.reduce((s,i)=>s+i.total,0);
+  const s=document.getElementById('itSoma'); if(s) s.value=c2n(bruto);
+  const m=document.getElementById('itMenos'); if(m) m.innerHTML=c2r(bruto-DESC);
 }
 function addItem(){ ITENS.push({cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}); pintaItens(); }
 function usarTotalItens(){
