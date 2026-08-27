@@ -396,11 +396,11 @@
         <div class="row r3">
           <div class="fld"><label>Entrada (R$)</label><input type="number" id="pEnt" value="0" step="0.01" oninput="calcParcelas()"></div>
           <div class="fld"><label>Nº de parcelas</label><input type="number" id="pQtd" value="3" min="1" max="36" oninput="calcParcelas()"></div>
-          <div class="fld"><label>Intervalo (dias)</label><input type="number" id="pInt" value="30" oninput="calcParcelas()"></div>
+          <div class="fld"><label>Intervalo — dias</label><input type="text" id="pInt" value="30" oninput="calcParcelas()" placeholder="30 ou 30/45/60"></div>
         </div>
         <div class="row r2">
           <div class="fld"><label>1º vencimento</label><input type="date" id="pIni" oninput="calcParcelas()"></div>
-          <div class="fld"><label>Sobra de centavos</label><select id="pArr" onchange="calcParcelas()"><option value="last">Na última parcela</option><option value="first">Na primeira parcela</option></select></div>
+          <div class="fld"><label>&nbsp;</label><div class="mini" style="padding-top:9px;line-height:1.4">No intervalo, use um número (ex.: <b>30</b>) ou uma sequência (ex.: <b>30/45/60</b> — dias a partir da data do pedido).</div></div>
         </div>
         <div class="pillbar">
           <span class="pill" onclick="preset(1,0)">À vista</span>
@@ -1002,6 +1002,8 @@ function toast(m){ const d=document.createElement('div'); d.className='toast'; d
 
 function pagoDe(p){ return (p.pagos||[]).reduce((s,x)=>s+x.valor,0); }
 function saldoDe(p){ return p.valor - pagoDe(p); }
+function ehEntrada(x){ return !!(x&&(x.pagos||[]).some(g=>g.forma==='Entrada')); }
+function rotuloParc(arr,i){ const te=arr[0]&&ehEntrada(arr[0]); return ehEntrada(arr[i])?'Entrada':((te?i:i+1)+'/'+(te?arr.length-1:arr.length)); }
 function statusDe(p){
   const s=saldoDe(p);
   if(s<=0) return 'pago';
@@ -1571,7 +1573,7 @@ function verPedido(id){
     <div class="tot"><span>Total do pedido</span><span>${c2r(p.total)}</span></div>
     ${(p.itens||[]).some(i=>i.lucro)?`<div class="tot" style="border:0;padding-top:2px;font-size:13px;color:var(--ok)"><span>Lucro total</span><span>${c2r((p.itens||[]).reduce((s,i)=>s+(i.lucro||0),0))}</span></div>`:''}
     <table><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>
-    ${p.parcelas.map((x,i)=>`<tr class="${saldoDe(x)<=0?'lpago':''}"><td><b>${i+1}/${p.parcelas.length}</b></td><td>${dbr(x.venc)}</td><td class="num">${c2r(x.valor)}</td>
+    ${p.parcelas.map((x,i)=>`<tr class="${saldoDe(x)<=0?'lpago':''}"><td><b>${rotuloParc(p.parcelas,i)}</b></td><td>${dbr(x.venc)}</td><td class="num">${c2r(x.valor)}</td>
       <td class="num">${pagoDe(x)?c2r(pagoDe(x)):'—'}</td><td class="num" style="font-weight:700">${saldoDe(x)>0?c2r(saldoDe(x)):'—'}</td>
       <td>${tagDe(x)}</td><td>${saldoDe(x)>0?`<button class="btn sm" onclick="abrirBaixa('${p.id}',${i})">Baixa</button>`:`<button class="btn sm ghost" onclick="abrirBaixa('${p.id}',${i})">Ver</button>`}</td></tr>`).join('')}
     </tbody></table>
@@ -1603,31 +1605,39 @@ function parcelasEmBranco(){
 function calcParcelas(){
   const total=r2c(document.getElementById('dTotal').value);
   const ent=r2c(document.getElementById('pEnt').value);
-  const n=Math.max(1,parseInt(document.getElementById('pQtd').value||1));
-  const inter=parseInt(document.getElementById('pInt').value||30);
-  let ini=document.getElementById('pIni').value;
-  if(!ini){ ini=addDias(document.getElementById('dData').value||hoje(),inter||30); document.getElementById('pIni').value=ini; }
-  const modo=document.getElementById('pArr').value;
   const rest=Math.max(0,total-ent);
-  const base=Math.floor(rest/n), sobra=rest-base*n;
-  PARC=[];
-  if(ent>0) PARC.push({venc:document.getElementById('dData').value||hoje(),valor:ent,ent:true});
-  for(let i=0;i<n;i++){
-    let v=base;
-    if(modo==='last'&&i===n-1) v+=sobra;
-    if(modo==='first'&&i===0) v+=sobra;
-    PARC.push({venc:addDias(ini,inter*i),valor:v});
+  const pedData=document.getElementById('dData').value||hoje();
+  const raw=(document.getElementById('pInt').value||'30').trim();
+  const lista=raw.split(/[\/,;\s]+/).map(s=>parseInt(s,10)).filter(v=>!isNaN(v)&&v>=0);
+  let datas=[];
+  if(lista.length>1){
+    /* sequência tipo 30/45/60: cada número é dias a partir da data do pedido */
+    datas=lista.map(d=>addDias(pedData,d));
+    document.getElementById('pQtd').value=lista.length;
+    document.getElementById('pIni').value=datas[0];
+  }else{
+    const n=Math.max(1,parseInt(document.getElementById('pQtd').value||1));
+    const inter=lista.length?lista[0]:30;
+    let ini=document.getElementById('pIni').value;
+    if(!ini){ ini=addDias(pedData,inter||30); document.getElementById('pIni').value=ini; }
+    for(let i=0;i<n;i++) datas.push(addDias(ini,inter*i));
   }
+  const n=datas.length;
+  const base=Math.floor(rest/n), sobra=rest-base*n;   /* a sobra de centavos vai sempre na última */
+  PARC=[];
+  if(ent>0) PARC.push({venc:pedData,valor:ent,ent:true});
+  for(let i=0;i<n;i++){ let v=base; if(i===n-1) v+=sobra; PARC.push({venc:datas[i],valor:v}); }
   pintaParc(total);
 }
 function pintaParc(total){
   document.getElementById('tabParc').innerHTML=`<table style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
     <thead><tr><th style="padding-left:12px">Parcela</th><th>Vencimento</th><th class="num" style="padding-right:12px">Valor (R$)</th></tr></thead><tbody>
-    ${PARC.map((p,i)=>`<tr><td style="padding-left:12px"><b>${p.ent?'Entrada':(p.ent?'':((PARC[0]&&PARC[0].ent?i:i+1)+'/'+(PARC[0]&&PARC[0].ent?PARC.length-1:PARC.length)))}</b></td>
+    ${PARC.map((p,i)=>`<tr><td style="padding-left:12px"><b style="${p.ent?'color:var(--ok)':''}">${p.ent?'Entrada ✓':((PARC[0]&&PARC[0].ent?i:i+1)+'/'+(PARC[0]&&PARC[0].ent?PARC.length-1:PARC.length))}</b></td>
       <td><input type="date" value="${p.venc}" onchange="PARC[${i}].venc=this.value" style="width:145px"></td>
       <td class="num" style="padding-right:12px"><input type="number" step="0.01" value="${(p.valor/100).toFixed(2)}" onchange="PARC[${i}].valor=Math.round(this.value*100);atualizaSomaParc(${total})" style="width:110px;text-align:right">
       <a class="lnk" style="color:var(--bad);margin-left:6px" onclick="PARC.splice(${i},1);pintaParc(${total})">✕</a></td></tr>`).join('')}
     </tbody></table>
+    ${PARC[0]&&PARC[0].ent?`<div class="mini" style="margin-top:6px;color:var(--ok)">A entrada é registrada como <b>recebida na data do pedido</b> — ela não fica como parcela a receber. As demais são o restante.</div>`:''}
     <div style="margin-top:8px"><button class="btn sm ghost" onclick="addParcela(${total})">+ Adicionar parcela</button>
     <button class="btn sm ghost" onclick="distribuirResto(${total})">Distribuir o que falta</button></div>`;
   atualizaSomaParc(total);
@@ -1759,7 +1769,8 @@ function salvarPedido(){
     const perdidas=antigas.slice(PARC.length).reduce((s,x)=>s+(x.pagos||[]).length,0);
     if(perdidas && !confirm('O pedido passou de '+antigas.length+' para '+PARC.length+' parcelas.\n\n'+perdidas+' recebimento(s) das parcelas removidas serão apagados. Continuar?')) return;
     Object.assign(p,base);
-    p.parcelas=PARC.map((q,i)=>({venc:q.venc,valor:q.valor,pagos:(antigas[i]&&antigas[i].pagos)||[]}));
+    p.parcelas=PARC.map((q,i)=>{ const ap=(antigas[i]&&antigas[i].pagos)||[];
+      return {venc:q.venc,valor:q.valor,pagos:(q.ent&&q.valor>0&&!ap.length)?[{valor:q.valor,data:base.data,forma:'Entrada',obs:'entrada'}]:ap}; });
     const excedeu=p.parcelas.find(x=>pagoDe(x)>x.valor);
     save(); limparNovo(); renderAll();
     toast('Pedido #'+num+' atualizado');
@@ -1767,7 +1778,7 @@ function salvarPedido(){
     go('pedidos'); verPedido(alvo);
     return;
   }
-  DB.pedidos.push(Object.assign({id:uid(),parcelas:PARC.map(q=>({venc:q.venc,valor:q.valor,pagos:[]}))},base));
+  DB.pedidos.push(Object.assign({id:uid(),parcelas:PARC.map(q=>({venc:q.venc,valor:q.valor,pagos:(q.ent&&q.valor>0)?[{valor:q.valor,data:base.data,forma:'Entrada',obs:'entrada'}]:[]}))},base));
   save(); limparNovo(); toast('Pedido salvo — parcelas geradas'); go('pedidos');
 }
 function editarPedido(id){
@@ -1787,7 +1798,7 @@ function editarPedido(id){
   ITENS=(p.itens||[]).map(i=>Object.assign({},i));
   DESC=p.desc||0;
   pintaItens();
-  PARC=(p.parcelas||[]).map(x=>({venc:x.venc,valor:x.valor}));
+  PARC=(p.parcelas||[]).map(x=>({venc:x.venc,valor:x.valor,ent:(x.pagos||[]).some(g=>g.forma==='Entrada'||g.obs==='entrada')}));
   pintaParc(p.total);
   document.getElementById('btSalvarPed').textContent='Salvar alterações do pedido #'+p.num;
   const pagos=(p.parcelas||[]).reduce((s,x)=>s+(x.pagos||[]).length,0);
@@ -2223,7 +2234,7 @@ function imprimirPedido(id){
   <div class="tot"><span>TOTAL DO PEDIDO</span><span>${c2r(p.total)}</span></div>
   ${parc.length?`<h3>Forma de pagamento${p.cond?' — '+esc(p.cond):''}</h3>
   <table><thead><tr><th>Parcela</th><th>Vencimento</th><th class="n">Valor</th></tr></thead><tbody>
-  ${parc.map((x,i)=>`<tr><td>${i+1}/${parc.length}</td><td>${dbr(x.venc)}</td><td class="n">${c2n(x.valor)}</td></tr>`).join('')}
+  ${parc.map((x,i)=>`<tr><td>${rotuloParc(parc,i)}</td><td>${dbr(x.venc)}</td><td class="n">${c2n(x.valor)}</td></tr>`).join('')}
   </tbody></table>`:''}
   <div class="ft">${esc(DB.cfg.empresa||'')} · Emitido em ${dbr(hoje())}</div>
   </body></html>`);
