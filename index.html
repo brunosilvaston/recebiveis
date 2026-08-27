@@ -356,10 +356,10 @@
         <h2>1. PDF do pedido <small>opcional — dá para digitar na mão</small></h2>
         <div class="pad">
           <div class="drop" id="drop">
-            <div class="big">⬆</div><b>Arraste o PDF aqui ou clique para escolher</b>
-            <small>Lê cliente, CNPJ, data, itens e valor total automaticamente</small>
+            <div class="big">⬆</div><b>Arraste um ou mais PDFs aqui ou clique para escolher</b>
+            <small>Lê cliente, CNPJ, data, itens e valor total. Vários PDFs somam os produtos no mesmo pedido.</small>
           </div>
-          <input type="file" id="pdfFile" accept="application/pdf" class="hidden">
+          <input type="file" id="pdfFile" accept="application/pdf" multiple class="hidden">
           <div id="pdfMsg" style="margin-top:12px"></div>
         </div>
       </div>
@@ -1802,31 +1802,45 @@ const drop=document.getElementById('drop'), pdfFile=document.getElementById('pdf
 drop.onclick=()=>pdfFile.click();
 drop.ondragover=e=>{e.preventDefault();drop.classList.add('on')};
 drop.ondragleave=()=>drop.classList.remove('on');
-drop.ondrop=e=>{e.preventDefault();drop.classList.remove('on'); if(e.dataTransfer.files[0]) lerPDF(e.dataTransfer.files[0]);};
-pdfFile.onchange=e=>{ if(e.target.files[0]) lerPDF(e.target.files[0]); };
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('on'); lerPDFs(e.dataTransfer.files);};
+pdfFile.onchange=e=>{ lerPDFs(e.target.files); e.target.value=''; };
 
 function msg(html,cls){ document.getElementById('pdfMsg').innerHTML=`<div class="note ${cls||''}">${html}</div>`; }
 
-async function lerPDF(file){
+async function lerUmPDF(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  let linhas=[];
+  for(let i=1;i<=pdf.numPages;i++){
+    const pg=await pdf.getPage(i); const tc=await pg.getTextContent();
+    const its=tc.items.map(it=>({x:it.transform[4],y:it.transform[5],w:it.width,s:it.str})).filter(i=>i.s.trim()!=='');
+    its.sort((a,b)=> Math.abs(a.y-b.y)>2 ? b.y-a.y : a.x-b.x);
+    let cur=[],lastY=null;
+    its.forEach(it=>{
+      if(lastY!==null&&Math.abs(it.y-lastY)>2){ linhas.push(montar(cur)); cur=[]; }
+      cur.push(it); lastY=it.y;
+    });
+    if(cur.length) linhas.push(montar(cur));
+  }
+  return parse(linhas,file.name);
+}
+/* aceita 1 ou vários PDFs; o primeiro preenche o pedido, os demais somam os produtos */
+async function lerPDFs(fileList){
   if(!PDFOK||typeof pdfjsLib==='undefined'){ msg('Leitor de PDF não carregou (precisa de internet na primeira vez). Digite os dados na mão — funciona igual.','err'); return; }
-  msg('Lendo o PDF...');
-  try{
-    const buf=await file.arrayBuffer();
-    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-    let linhas=[];
-    for(let i=1;i<=pdf.numPages;i++){
-      const pg=await pdf.getPage(i); const tc=await pg.getTextContent();
-      const its=tc.items.map(it=>({x:it.transform[4],y:it.transform[5],w:it.width,s:it.str})).filter(i=>i.s.trim()!=='');
-      its.sort((a,b)=> Math.abs(a.y-b.y)>2 ? b.y-a.y : a.x-b.x);
-      let cur=[],lastY=null;
-      its.forEach(it=>{
-        if(lastY!==null&&Math.abs(it.y-lastY)>2){ linhas.push(montar(cur)); cur=[]; }
-        cur.push(it); lastY=it.y;
-      });
-      if(cur.length) linhas.push(montar(cur));
-    }
-    aplicar(parse(linhas,file.name));
-  }catch(e){ msg('Não consegui ler este PDF ('+e.message+'). Digite os dados na mão.','err'); }
+  const files=[...(fileList||[])].filter(f=>f && (/pdf/i.test(f.type)||/\.pdf$/i.test(f.name)));
+  if(!files.length){ msg('Solte um arquivo PDF.','err'); return; }
+  const jaTem=ITENS.some(i=>(i.desc||'').trim()||(i.cod||'').trim()||i.total>0);
+  let adicionar=false;
+  if(jaTem){
+    adicionar=confirm('Este pedido já tem produtos.\n\nOK = ADICIONAR os produtos do(s) novo(s) PDF a este pedido (soma itens e total).\nCancelar = SUBSTITUIR pelos do novo PDF.');
+  }
+  msg(files.length>1?('Lendo '+files.length+' PDFs...'):'Lendo o PDF...');
+  let lidos=0, erros=0;
+  for(const f of files){
+    try{ const R=await lerUmPDF(f); aplicar(R, adicionar||lidos>0); lidos++; }
+    catch(e){ erros++; console.warn('pdf',f.name,e.message); }
+  }
+  if(erros) msg('Li '+lidos+' PDF(s). '+erros+' não consegui ler (pode ser PDF escaneado, que é imagem sem texto). Complete esses na mão.', lidos?'':'err');
 }
 function montar(its){
   let out='',prev=null;
@@ -2000,7 +2014,26 @@ function parsePedidoOK(L,fname){
 }
 
 let EXTRA_CLI={};
-function aplicar(R){
+function aplicar(R, add){
+  if(add){
+    /* ADICIONA ao pedido atual: soma itens e total, mantém o cliente já preenchido */
+    const enc=(id,v)=>{ const el=document.getElementById(id); if(v&&!el.value.trim()) el.value=v; };
+    enc('dNum',R.num); enc('dData',R.data); enc('dCli',R.nome); enc('dDoc',R.doc);
+    enc('dFant',R.fantasia); enc('dCid',R.cidade); enc('dFone',R.fone);
+    if(R.obs){ const o=document.getElementById('dObs'); o.value=(o.value.trim()?o.value.trim()+' · ':'')+R.obs; }
+    if(R.endereco&&!EXTRA_CLI.endereco) EXTRA_CLI.endereco=R.endereco;
+    if(R.cep&&!EXTRA_CLI.cep) EXTRA_CLI.cep=R.cep;
+    ITENS=ITENS.filter(i=>(i.desc||'').trim()||(i.cod||'').trim()||i.total>0);   // tira a linha em branco inicial
+    (R.itens||[]).forEach(i=>ITENS.push(i));
+    DESC+=R.desc||0;
+    const tEl=document.getElementById('dTotal');
+    const novo=R.total||((R.itens||[]).reduce((s,i)=>s+i.total,0));
+    tEl.value=((r2c(tEl.value)+novo)/100).toFixed(2);
+    pintaItens();
+    msg('<b>+ PDF somado ✓</b> — juntei '+((R.itens||[]).length)+' item(ns). O pedido agora tem <b>'+ITENS.length+' item(ns)</b> e total <b>'+c2r(r2c(tEl.value))+'</b>. Confira antes de salvar.','ok');
+    calcParcelas();
+    return;
+  }
   EXTRA_CLI={endereco:R.endereco||'',cep:R.cep||''};
   if(R.num) document.getElementById('dNum').value=R.num;
   if(R.data) document.getElementById('dData').value=R.data;
