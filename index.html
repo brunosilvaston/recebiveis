@@ -1561,7 +1561,8 @@ function verPedido(id){
   const c=cliDe(p.clienteId);
   const box=document.getElementById('detPedido'); box.classList.remove('hidden');
   box.innerHTML=`<h2>Pedido #${esc(p.num)} — ${esc(c.nome)} <small>${dbr(p.data)} · ${esc(p.obs||'')}</small>
-    <span><button class="btn sm" onclick="editarPedido('${p.id}')">Editar pedido</button>
+    <span><button class="btn sm" onclick="imprimirPedido('${p.id}')">🖨 Imprimir</button>
+    <button class="btn sm ghost" onclick="editarPedido('${p.id}')">Editar pedido</button>
     <button class="btn sm ghost" onclick="document.getElementById('detPedido').classList.add('hidden')">fechar</button></span></h2>
     ${(p.itens||[]).length?`<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unit.</th><th class="num">Total</th><th class="num">Lucro</th></tr></thead><tbody>
     ${p.itens.map(i=>`<tr><td>${esc(i.cod)}</td><td>${esc(i.desc)}</td><td>${esc(i.un||'')}</td><td class="num">${i.qtd.toLocaleString('pt-BR')}</td><td class="num">${c2n(i.unit)}</td><td class="num">${c2n(i.total)}</td><td class="num" style="color:var(--ok)">${i.lucro?c2n(i.lucro):'—'}</td></tr>`).join('')}
@@ -2179,6 +2180,45 @@ function imprimirExtrato(id){
   </tbody></table>
   <div class="tot"><span>SALDO DEVEDOR TOTAL</span><span>${c2r(saldo)}</span></div>
   ${venc>0?`<div class="tot" style="border:0;padding-top:2px;font-size:12px;color:#b91c1c"><span>Sendo vencido</span><span>${c2r(venc)}</span></div>`:''}
+  <div class="ft">Documento gerado pelo controle de recebíveis · ${dbr(hoje())}</div>
+  </body></html>`);
+  w.document.close(); setTimeout(()=>w.print(),400);
+}
+/* imprime UM pedido (itens, total e parcelas). Não mostra o lucro — é interno. */
+function imprimirPedido(id){
+  const p=DB.pedidos.find(x=>x.id===id); if(!p){ toast('Pedido não encontrado'); return; }
+  const c=cliDe(p.clienteId);
+  const itens=p.itens||[], parc=p.parcelas||[];
+  const bruto=itens.reduce((s,i)=>s+i.total,0);
+  const w=window.open('','_blank'); if(!w){ toast('Libere pop-ups para imprimir'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Pedido ${esc(p.num)} — ${esc(c.nome)}</title>
+  <style>body{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#0f172a;padding:26px;font-size:12px}
+  h1{font-size:17px;margin:0 0 2px}h2{font-size:12px;font-weight:400;color:#64748b;margin:0 0 16px}
+  h3{font-size:13px;margin:22px 0 0}
+  .em{font-size:11px;color:#64748b;margin-bottom:14px;border-bottom:2px solid #0f172a;padding-bottom:8px}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
+  th{background:#f1f5f9;text-align:left;padding:7px;font-size:10px;text-transform:uppercase;border-bottom:1px solid #cbd5e1}
+  td{padding:7px;border-bottom:1px solid #eef2f7}.n{text-align:right}
+  .r{background:#fef2f2;color:#b91c1c;font-weight:700}.p{color:#047857}
+  .sub{display:flex;justify-content:space-between;font-size:12px;color:#475569;padding:2px 0}
+  .tot{margin-top:12px;border-top:2px solid #0f172a;padding-top:10px;display:flex;justify-content:space-between;font-size:14px;font-weight:700}
+  .ft{margin-top:26px;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:8px}
+  @media print{body{padding:0}}</style></head><body>
+  <div class="em"><b>${esc(DB.cfg.empresa||'')}</b></div>
+  <h1>Pedido #${esc(p.num)}</h1>
+  <h2><b>${esc(c.nome)}</b>${[c.doc,c.cidade,c.fone].filter(Boolean).length?' — '+[c.doc,c.cidade,c.fone].filter(Boolean).map(esc).join(' · '):''}
+  ${c.endereco?'<br>Entrega: '+esc([c.endereco,c.bairro,c.cidade,c.cep&&('CEP '+c.cep)].filter(Boolean).join(', ')):''}
+  <br>Data do pedido: ${dbr(p.data)}${p.obs?' · Obs: '+esc(p.obs):''}</h2>
+  ${itens.length?`<table><thead><tr><th>Código</th><th>Descrição</th><th>Un.</th><th class="n">Qtd</th><th class="n">Unitário</th><th class="n">Total</th></tr></thead><tbody>
+  ${itens.map(i=>`<tr><td>${esc(i.cod||'')}</td><td>${esc(i.desc||'')}</td><td>${esc(i.un||'')}</td><td class="n">${(i.qtd||0).toLocaleString('pt-BR')}</td><td class="n">${c2n(i.unit)}</td><td class="n">${c2n(i.total)}</td></tr>`).join('')}
+  </tbody></table>
+  <div class="sub" style="margin-top:10px"><span>Soma dos produtos</span><span>${c2r(bruto)}</span></div>`:''}
+  ${p.desc?`<div class="sub"><span>Desconto</span><span>− ${c2r(p.desc)}</span></div>`:''}
+  <div class="tot"><span>TOTAL DO PEDIDO</span><span>${c2r(p.total)}</span></div>
+  ${parc.length?`<h3>Parcelas</h3>
+  <table><thead><tr><th>Parcela</th><th>Vencimento</th><th class="n">Valor</th><th class="n">Pago</th><th class="n">Saldo</th><th>Situação</th></tr></thead><tbody>
+  ${parc.map((x,i)=>{const s=statusDe(x);return `<tr class="${s==='vencido'?'r':''}"><td>${i+1}/${parc.length}</td><td>${dbr(x.venc)}</td><td class="n">${c2n(x.valor)}</td><td class="n">${pagoDe(x)?c2n(pagoDe(x)):'—'}</td><td class="n">${saldoDe(x)>0?c2n(saldoDe(x)):'—'}</td><td class="${s==='pago'?'p':''}">${LBL[s]}</td></tr>`;}).join('')}
+  </tbody></table>`:''}
   <div class="ft">Documento gerado pelo controle de recebíveis · ${dbr(hoje())}</div>
   </body></html>`);
   w.document.close(); setTimeout(()=>w.print(),400);
