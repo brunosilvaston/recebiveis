@@ -628,7 +628,7 @@ async function baixarTudo(){
   const mp={};
   (pe||[]).forEach(p=>{ const o={id:p.id,num:String(p.num),data:p.data||'',clienteId:p.cliente_id,total:+p.total||0,
     cond:p.cond||'',obs:p.obs||'',desc:+p.desconto||0,itens:[],parcelas:[]}; mp[p.id]=o; nb.pedidos.push(o); });
-  (it||[]).forEach(i=>{ const o=mp[i.pedido_id]; if(o) o.itens.push({cod:i.cod||'',desc:i.descricao||'',un:i.un||'',qtd:+i.qtd||0,unit:+i.unit||0,total:+i.total||0}); });
+  (it||[]).forEach(i=>{ const o=mp[i.pedido_id]; if(o) o.itens.push({cod:i.cod||'',desc:i.descricao||'',un:i.un||'',qtd:+i.qtd||0,unit:+i.unit||0,total:+i.total||0,lucro:+i.lucro||0}); });
   const mpar={};
   (pa||[]).forEach(x=>{ const o=mp[x.pedido_id]; if(!o) return; const q={venc:x.venc,valor:+x.valor||0,pagos:[]}; o.parcelas[x.n-1]=q; mpar[x.id]=q; });
   (re||[]).forEach(g=>{ const q=mpar[g.parcela_id]; if(!q) return;
@@ -664,7 +664,7 @@ async function subirMudancas(){
   const mudados=[];
   DB.pedidos.forEach(p=>{ const j=JSON.stringify(p); jP[p.id]=j; if(ESPELHO.p[p.id]===j) return; mudados.push(p);
     ped.push({id:p.id,num:String(p.num),data:p.data||null,cliente_id:p.clienteId,total:p.total||0,cond:p.cond||null,obs:p.obs||null,desconto:p.desc||0});
-    (p.itens||[]).forEach((i,k)=>ite.push({id:p.id+'-'+k,pedido_id:p.id,seq:k,cod:i.cod||null,descricao:i.desc||null,un:i.un||null,qtd:i.qtd||0,unit:i.unit||0,total:i.total||0}));
+    (p.itens||[]).forEach((i,k)=>ite.push({id:p.id+'-'+k,pedido_id:p.id,seq:k,cod:i.cod||null,descricao:i.desc||null,un:i.un||null,qtd:i.qtd||0,unit:i.unit||0,total:i.total||0,lucro:i.lucro||0}));
     (p.parcelas||[]).forEach((x,k)=>{ const pid=p.id+'-'+(k+1);
       par.push({id:pid,pedido_id:p.id,n:k+1,venc:x.venc,valor:x.valor||0});
       (x.pagos||[]).forEach((g,s)=>rec.push({id:pid+'-'+s,parcela_id:pid,pedido_id:p.id,n:k+1,seq:s,
@@ -1562,11 +1562,12 @@ function verPedido(id){
   box.innerHTML=`<h2>Pedido #${esc(p.num)} — ${esc(c.nome)} <small>${dbr(p.data)} · ${esc(p.obs||'')}</small>
     <span><button class="btn sm" onclick="editarPedido('${p.id}')">Editar pedido</button>
     <button class="btn sm ghost" onclick="document.getElementById('detPedido').classList.add('hidden')">fechar</button></span></h2>
-    ${(p.itens||[]).length?`<table><thead><tr><th>Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unit.</th><th class="num">Total</th></tr></thead><tbody>
-    ${p.itens.map(i=>`<tr><td>${esc(i.cod)}</td><td>${esc(i.desc)}</td><td>${esc(i.un||'')}</td><td class="num">${i.qtd.toLocaleString('pt-BR')}</td><td class="num">${c2n(i.unit)}</td><td class="num">${c2n(i.total)}</td></tr>`).join('')}
-    </tbody></table>`:''}
+    ${(p.itens||[]).length?`<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unit.</th><th class="num">Total</th><th class="num">Lucro</th></tr></thead><tbody>
+    ${p.itens.map(i=>`<tr><td>${esc(i.cod)}</td><td>${esc(i.desc)}</td><td>${esc(i.un||'')}</td><td class="num">${i.qtd.toLocaleString('pt-BR')}</td><td class="num">${c2n(i.unit)}</td><td class="num">${c2n(i.total)}</td><td class="num" style="color:var(--ok)">${i.lucro?c2n(i.lucro):'—'}</td></tr>`).join('')}
+    </tbody></table></div>`:''}
     ${p.desc?`<div class="tot" style="border:0;padding-bottom:0;font-size:13px;font-weight:400;color:var(--muted)"><span>Desconto concedido</span><span>− ${c2r(p.desc)}</span></div>`:''}
     <div class="tot"><span>Total do pedido</span><span>${c2r(p.total)}</span></div>
+    ${(p.itens||[]).some(i=>i.lucro)?`<div class="tot" style="border:0;padding-top:2px;font-size:13px;color:var(--ok)"><span>Lucro total</span><span>${c2r((p.itens||[]).reduce((s,i)=>s+(i.lucro||0),0))}</span></div>`:''}
     <table><thead><tr><th>Parcela</th><th>Vencimento</th><th class="num">Valor</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>
     ${p.parcelas.map((x,i)=>`<tr class="${saldoDe(x)<=0?'lpago':''}"><td><b>${i+1}/${p.parcelas.length}</b></td><td>${dbr(x.venc)}</td><td class="num">${c2r(x.valor)}</td>
       <td class="num">${pagoDe(x)?c2r(pagoDe(x)):'—'}</td><td class="num" style="font-weight:700">${saldoDe(x)>0?c2r(saldoDe(x)):'—'}</td>
@@ -1661,28 +1662,32 @@ let ITENS=[];
 function pintaItens(){
   const box=document.getElementById('itensBox');
   const bruto=ITENS.reduce((s,i)=>s+i.total,0);
+  const lucroTot=ITENS.reduce((s,i)=>s+(i.lucro||0),0);
   box.innerHTML=`
     <div class="fld" style="margin-top:6px;display:flex;justify-content:space-between;align-items:center">
       <label style="margin:0">Produtos do pedido${ITENS.length?' ('+ITENS.length+')':''}</label>
       <button class="btn sm ghost" onclick="addItem()">+ Adicionar produto</button></div>
-    ${ITENS.length?`<table style="border:1px solid var(--line);border-radius:8px;overflow:hidden">
-    <thead><tr><th style="padding-left:12px">Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unitário</th><th class="num">Total</th><th style="padding-right:12px"></th></tr></thead>
+    ${ITENS.length?`<div style="overflow-x:auto"><table style="border:1px solid var(--line);border-radius:8px;overflow:hidden;min-width:640px">
+    <thead><tr><th style="padding-left:12px">Código</th><th>Descrição</th><th>Un.</th><th class="num">Qtd</th><th class="num">Unitário</th><th class="num">Total</th><th class="num">Lucro (R$)</th><th style="padding-right:12px"></th></tr></thead>
     <tbody>${ITENS.map((i,k)=>`<tr>
-      <td style="padding-left:12px"><input class="ed" style="width:88px" value="${esc(i.cod||'')}" onchange="ITENS[${k}].cod=this.value"></td>
-      <td><input class="ed" style="width:100%;min-width:170px" value="${esc(i.desc||'')}" onchange="ITENS[${k}].desc=this.value"></td>
-      <td><input class="ed" style="width:48px" value="${esc(i.un||'')}" onchange="ITENS[${k}].un=this.value"></td>
-      <td class="num"><input id="it${k}q" class="ed num" type="number" step="0.001" style="width:86px" value="${i.qtd}" onchange="itemCalc(${k},'qtd',this.value)"></td>
-      <td class="num"><input id="it${k}u" class="ed num" type="number" step="0.01" style="width:96px" value="${(i.unit/100).toFixed(2)}" onchange="itemCalc(${k},'unit',this.value)"></td>
-      <td class="num"><input id="it${k}t" class="ed num" type="number" step="0.01" style="width:106px;font-weight:700" value="${(i.total/100).toFixed(2)}" onchange="itemCalc(${k},'total',this.value)"></td>
+      <td style="padding-left:12px"><input class="ed" style="width:84px" value="${esc(i.cod||'')}" onchange="ITENS[${k}].cod=this.value"></td>
+      <td><input class="ed" style="width:100%;min-width:140px" value="${esc(i.desc||'')}" onchange="ITENS[${k}].desc=this.value"></td>
+      <td><input class="ed" style="width:46px" value="${esc(i.un||'')}" onchange="ITENS[${k}].un=this.value"></td>
+      <td class="num"><input id="it${k}q" class="ed num" type="number" step="0.001" style="width:78px" value="${i.qtd}" onchange="itemCalc(${k},'qtd',this.value)"></td>
+      <td class="num"><input id="it${k}u" class="ed num" type="number" step="0.01" style="width:90px" value="${(i.unit/100).toFixed(2)}" onchange="itemCalc(${k},'unit',this.value)"></td>
+      <td class="num"><input id="it${k}t" class="ed num" type="number" step="0.01" style="width:98px;font-weight:700" value="${(i.total/100).toFixed(2)}" onchange="itemCalc(${k},'total',this.value)"></td>
+      <td class="num"><input id="it${k}l" class="ed num" type="number" step="0.01" style="width:92px;color:var(--ok)" value="${((i.lucro||0)/100).toFixed(2)}" onchange="itemLucro(${k},this.value)"></td>
       <td style="padding-right:12px"><a class="lnk" style="color:var(--bad)" onclick="ITENS.splice(${k},1);pintaItens()">✕</a></td></tr>`).join('')}
-    </tbody></table>
+    </tbody></table></div>
     <div class="row r2" style="margin-top:10px">
       <div class="fld"><label>Soma dos produtos</label><input id="itSoma" type="text" value="${c2n(bruto)}" disabled></div>
       <div class="fld"><label>Desconto (R$)</label><input type="number" step="0.01" id="dDesc" value="${(DESC/100).toFixed(2)}" onchange="DESC=r2c(this.value);atualizaSomaItens()"></div>
     </div>
     <div class="note" style="display:flex;justify-content:space-between;align-items:center">
       <span>Total dos produtos menos o desconto: <b id="itMenos">${c2r(bruto-DESC)}</b></span>
-      <button class="btn sm" onclick="usarTotalItens()">Usar como total do pedido</button></div>`:''}`;
+      <button class="btn sm" onclick="usarTotalItens()">Usar como total do pedido</button></div>
+    <div class="note ok" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span><b>Lucro total do pedido</b></span><b id="itLucro" style="font-size:15px">${c2r(lucroTot)}</b></div>`:''}`;
 }
 let DESC=0;
 function itemCalc(k,campo,valor){
@@ -1697,12 +1702,14 @@ function itemCalc(k,campo,valor){
   if(campo!=='total'&&t) t.value=(i.total/100).toFixed(2);
   atualizaSomaItens();
 }
+function itemLucro(k,valor){ ITENS[k].lucro=r2c(valor); atualizaSomaItens(); }
 function atualizaSomaItens(){
   const bruto=ITENS.reduce((s,i)=>s+i.total,0);
   const s=document.getElementById('itSoma'); if(s) s.value=c2n(bruto);
   const m=document.getElementById('itMenos'); if(m) m.innerHTML=c2r(bruto-DESC);
+  const l=document.getElementById('itLucro'); if(l) l.innerHTML=c2r(ITENS.reduce((a,i)=>a+(i.lucro||0),0));
 }
-function addItem(){ ITENS.push({cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}); pintaItens(); }
+function addItem(){ ITENS.push({cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0,lucro:0}); pintaItens(); }
 function usarTotalItens(){
   const t=ITENS.reduce((s,i)=>s+i.total,0)-DESC;
   document.getElementById('dTotal').value=(t/100).toFixed(2);
@@ -1792,7 +1799,7 @@ function limparNovo(){
   document.getElementById('dTotal').value=''; document.getElementById('dData').value=hoje();
   document.getElementById('pEnt').value=0; document.getElementById('pQtd').value=3;
   document.getElementById('pInt').value=30; document.getElementById('pIni').value='';
-  ITENS=[{cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}]; DESC=0; EDIT=null; EXTRA_CLI={}; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
+  ITENS=[{cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0,lucro:0}]; DESC=0; EDIT=null; EXTRA_CLI={}; pintaItens(); document.getElementById('pdfMsg').innerHTML='';
   const b=document.getElementById('btSalvarPed'); if(b) b.textContent='Salvar pedido';
   calcParcelas();
 }
@@ -2201,7 +2208,7 @@ function fecharModal(){ const m=document.getElementById('mdl'); if(m) m.remove()
 function renderAll(){ renderVisao(); renderReceber(); renderClientes(); renderPedidos(); }
 load();
 document.getElementById('dData').value=hoje();
-ITENS=[{cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0}]; pintaItens();
+ITENS=[{cod:'',desc:'',un:'PC',qtd:1,unit:0,total:0,lucro:0}]; pintaItens();
 calcParcelas();
 periodo('tudo');
 marcaAtalho('ped','tudo');
