@@ -204,6 +204,7 @@
     <div id="avancado" class="hidden">
       <a onclick="document.getElementById('impFile').click()">↑ Restaurar backup (.json)</a>
       <a onclick="restaurarNuvem()">☁ Restaurar do banco (por dia)</a>
+      <a onclick="corrigirFantasias()">✎ Corrigir nomes repetidos (fantasia)</a>
       <a onclick="zerarTudo()" style="color:#f87171">✕ Apagar tudo</a>
     </div>
     <input type="file" id="impFile" accept=".json" class="hidden">
@@ -1909,9 +1910,8 @@ function parseUpSeller(L,fname){
     });
   }
 
-  // loja de origem entra como fantasia
-  m=txt.match(/Nome da sua loja:?\s*(.+)/i);
-  if(m) R.fantasia=lim(m[1]).slice(0,40);
+  /* "Nome da sua loja" é a SUA loja (o vendedor), NÃO o cliente — não pode virar a
+     fantasia do cliente, senão todo pedido importado aparece com o nome da sua loja. */
 
   // observação
   const iObs=L.findIndex(l=>/^\s*Observa[çc][ãa]o\s*$/i.test(l));
@@ -2190,6 +2190,19 @@ function zerarTudo(){
   DB={cfg:DB.cfg,clientes:[],pedidos:[]}; save(); renderAll(); toast('Tudo apagado');
 }
 function toggleAvancado(){ const a=document.getElementById('avancado'); if(a) a.classList.toggle('hidden'); }
+/* limpa a "fantasia" que se repete em vários clientes (o nome da sua loja que entrou por
+   engano na importação e aparecia na frente do nome real nas listas de pedidos) */
+function corrigirFantasias(){
+  const cont={};
+  DB.clientes.forEach(c=>{ const f=(c.fantasia||'').trim(); if(f) cont[f]=(cont[f]||0)+1; });
+  const repetidas=Object.keys(cont).filter(f=>cont[f]>=2);
+  if(!repetidas.length){ alert('Não encontrei nenhum "nome fantasia" repetido entre clientes. Nada a corrigir.'); return; }
+  const lista=repetidas.map(f=>'• "'+f+'"  ('+cont[f]+' clientes)').join('\n');
+  const total=repetidas.reduce((s,f)=>s+cont[f],0);
+  if(!confirm('Estes nomes fantasia estão repetidos em vários clientes (provavelmente o nome da sua loja, que entrou por engano na importação):\n\n'+lista+'\n\nLimpar essa fantasia desses '+total+' cliente(s)? A razão social (nome real) continua intacta.')) return;
+  let n=0; DB.clientes.forEach(c=>{ if(repetidas.includes((c.fantasia||'').trim())){ c.fantasia=''; n++; } });
+  save(); renderAll(); toast(n+' cliente(s) corrigido(s)');
+}
 
 /* ================= MODAL ================= */
 function modal(titulo,html,botoes){
